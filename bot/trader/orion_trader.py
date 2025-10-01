@@ -12,7 +12,7 @@ from bot.connection.mock_connector import MockConnector
 from bot.analysis.strategy_selector import StrategySelector
 from bot.risk_management.risk_manager import RiskManager
 from bot.utils.market_hours import MarketHoursValidator
-
+from bot.trader.multi_asset_manager import MultiAssetManager
 
 class OrionTrader:
     """Classe principal que orquestra todo o sistema de trading"""
@@ -25,8 +25,14 @@ class OrionTrader:
         # Inicializar componentes
         self._initialize_components()
 
-        # INICIALIZAR VALIDADOR DE MERCADO ← ADICIONE ESTA LINHA
-        self.market_validator = MarketHoursValidator(self.connector, self.logger)
+        # INICIALIZAR MULTI-ASSET MANAGER ← ADICIONE ESTA LINHA
+        self.multi_asset_manager = MultiAssetManager(
+            self.connector,
+            self.strategy_selector,
+            self.risk_manager,
+            config,
+            logger
+        )
 
         # Estado do trader
         self.running = False
@@ -55,6 +61,10 @@ class OrionTrader:
             self.connector = IQConnector(email, password, account_type)
         else:
             raise ValueError(f"Modo inválido: {self.mode}")
+
+        # INICIALIZAR MARKET VALIDATOR ← ADICIONE ESTA LINHA
+        from bot.utils.market_hours import MarketHoursValidator
+        self.connector.market_validator = MarketHoursValidator(self.connector, self.logger)
 
         # Inicializar outros componentes
         self.strategy_selector = StrategySelector(self.config)
@@ -115,48 +125,145 @@ class OrionTrader:
         return df
 
     def execute_trading_cycle(self):
-        """Executa um ciclo completo de trading"""
+        """Executa um ciclo completo de trading multi-ativos"""
         try:
-            # 1. Obter dados de mercado
-            df = self.get_market_data()
-            if df.empty:
-                self.logger.warning("Dados de mercado vazios, aguardando próximo ciclo")
-                return
-
-            # DEBUG TEMPORÁRIO - Mostrar estrutura dos dados
-            if not df.empty:
-                self.logger.info(f"Colunas no DataFrame: {df.columns.tolist()}")
-                self.logger.info(f"Primeiras linhas:\\n{df.head(2)}")
-            else:
-                self.logger.warning("DataFrame vazio")
-                return
-
-            # 2. Atualizar saldo
+            # 1. Atualizar saldo
             self.balance = self.connector.get_balance()
 
-            # 3. Gerar sinal
-            signal = self.strategy_selector.get_trading_signal(df)
+            # 2. Analisar TODOS os ativos
+            all_signals = self.multi_asset_manager.analyze_all_assets()
 
-            # 4. Log do diagnóstico
-            self._log_market_analysis(signal)
+            if not all_signals:
+                self.logger.warning("Nenhum sinal gerado para os ativos monitorados")
+                return
 
-            # 5. Verificar se deve entrar em trade
-            if (signal['action'] == 'ENTER' and
-                    self.risk_manager.should_enter_trade(
-                        signal['regime'].value,
-                        len(self.open_trades),
-                        signal['confidence']
-                    )):
-                self._execute_trade(df, signal)
+            # 3. Log do resumo de ativos
+            self._log_assets_summary(all_signals)
+
+            # 4. Obter melhores sinais
+            top_signals = self.multi_asset_manager.get_top_signals(all_signals)
+
+            # 5. Executar trades nos melhores sinais
+            for signal in top_signals:
+                if self._should_execute_trade(signal):
+                    self._execute_trade(signal)
 
             # 6. Verificar trades abertas
-            self._check_open_trades()
-
-            # 7. Verificar trades abertas
-            self._check_open_trades()
+            #self._check_open_trades()
 
         except Exception as e:
             self.logger.error(f"Erro no ciclo de trading: {e}")
+
+    def _log_assets_summary(self, all_signals: Dict):
+        """Log do resumo de todos os ativos"""
+        self.logger.info("=== RESUMO MULTI-ATIVOS ===")
+
+        for asset, signal in all_signals.items():
+            analysis = signal.get('analysis', {})
+            state = self.multi_asset_manager.asset_states[asset]
+
+            self.logger.info(
+                f"{asset}: {signal['regime'].value} | "
+                f"Ação: {signal['action']} | "
+                f"Conf: {signal['confidence']:.2f} | "
+                f"Pri: {signal.get('priority_score', 0):.2f} | "
+                f"Trades: {state['open_trades']}"
+            )
+
+        self.logger.info("===========================")
+
+    def _should_execute_trade(self, signal: Dict) -> bool:
+        """Verifica se deve executar uma trade"""
+        asset = signal['asset']
+
+        # Verificar limites globais
+        max_trades = self.config['trading'].get('max_open_trades', 3)
+        if len(self.open_trades) >= max_trades:
+            self.logger.debug(f"Limite global de trades atingido ({max_trades})")
+            return False
+
+        # Verificar limites por ativo
+        asset_state = self.multi_asset_manager.asset_states[asset]
+        max_per_asset = self.config['trading'].get('max_trades_per_asset', 1)
+        if asset_state['open_trades'] >= max_per_asset:
+            self.logger.debug(f"Limite de trades para {asset} atingido ({max_per_asset})")
+            return False
+
+        # Verificar confiança mínima
+        if signal.get('confidence', 0) < 0.6:
+            return False
+
+        # Verificar regime (não operar em CHOPPY)
+        if signal['regime'].value == 'CHOPPY':
+            return False
+
+        return True
+
+    def _execute_trade(self, signal: Dict):
+        """Executa uma trade para um ativo específico"""
+        try:
+            asset = signal['asset']
+            direction = 'call' if signal['direction'] == 'LONG' else 'put'
+
+            # Calcular tamanho da posição
+            position_size = self.risk_manager.calculate_position_size(
+                self.balance, signal['confidence']
+            )
+
+            # Colocar ordem
+            order_id = self.connector.place_order(
+                asset=asset,
+                direction=direction,
+                amount=position_size,
+                expiration=1
+            )
+
+            if order_id:
+                # Registrar trade com informações do ativo
+                trade_info = {
+                    'order_id': order_id,
+                    'asset': asset,
+                    'direction': direction,
+                    'amount': position_size,
+                    'signal': signal
+                }
+                self.open_trades.append(trade_info)
+
+                # Atualizar contador do ativo
+                self.multi_asset_manager.update_trade_count(asset, +1)
+
+                self.logger.info(
+                    f"Trade executada - Ativo: {asset}, "
+                    f"Direção: {direction}, "
+                    f"Valor: ${position_size:.2f}, "
+                    f"Regime: {signal['regime'].value}"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Erro ao executar trade para {asset}: {e}")
+
+    def _check_open_trades(self):
+        """Verifica e atualiza trades abertas de todos os ativos"""
+        completed_trades = []
+
+        for trade in self.open_trades:
+            order_id = trade['order_id']
+            asset = trade['asset']
+
+            result = self.connector.check_win(order_id)
+
+            if result is not None:  # Trade finalizada
+                completed_trades.append(trade)
+                outcome = "GANHOU" if result else "PERDEU"
+
+                self.logger.info(f"Trade {order_id} ({asset}) finalizada: {outcome}")
+
+                # Atualizar contador do ativo
+                self.multi_asset_manager.update_trade_count(asset, -1)
+
+        # Remover trades finalizadas
+        for trade in completed_trades:
+            self.open_trades.remove(trade)
 
     def _log_market_analysis(self, signal: Dict):
         """Registra análise de mercado detalhada"""
@@ -222,6 +329,53 @@ Confiança: {signal['confidence']:.2f}
         for order_id in completed_trades:
             self.open_trades.remove(order_id)
 
+    def list_available_assets(self):
+        """Lista todos os ativos disponíveis na plataforma - VERSÃO CORRIGIDA"""
+        try:
+            available_assets = []
+
+            # Verificar se market_validator existe
+            if (hasattr(self.connector, 'market_validator') and
+                    hasattr(self.connector.market_validator, 'get_available_assets')):
+                available_assets = self.connector.market_validator.get_available_assets()
+
+            self.logger.info("=== ATIVOS DISPONÍVEIS NA PLATAFORMA ===")
+
+            if available_assets:
+                # Filtrar e categorizar ativos
+                forex_pairs = [asset for asset in available_assets if
+                               any(x in asset for x in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'])]
+                indices = [asset for asset in available_assets if
+                           any(x in asset for x in ['US30', 'SPX', 'NAS', 'GER30', 'FRA40', 'UK100', 'JP225'])]
+                commodities = [asset for asset in available_assets if
+                               any(x in asset for x in ['XAU', 'XAG', 'OIL', 'GAS'])]
+                crypto = [asset for asset in available_assets if
+                          any(x in asset for x in ['BTC', 'ETH', 'LTC', 'XRP', 'BCH'])]
+
+                self.logger.info(
+                    f"FOREX ({len(forex_pairs)}): {forex_pairs[:8]}{'...' if len(forex_pairs) > 8 else ''}")
+                self.logger.info(f"ÍNDICES ({len(indices)}): {indices}")
+                self.logger.info(f"COMMODITIES ({len(commodities)}): {commodities}")
+                self.logger.info(f"CRYPTO ({len(crypto)}): {crypto}")
+            else:
+                self.logger.info("Não foi possível obter lista de ativos da plataforma")
+                # Mostrar ativos padrão como fallback
+                default_assets = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'XAUUSD', 'XAGUSD',
+                                  'BTCUSD']
+                self.logger.info(f"Ativos padrão disponíveis: {default_assets}")
+
+            # Mostrar ativos configurados
+            configured_assets = self.multi_asset_manager.assets
+            self.logger.info(f"ATIVOS CONFIGURADOS NO BOT: {configured_assets}")
+
+            self.logger.info("========================================")
+
+        except Exception as e:
+            self.logger.error(f"Erro ao listar ativos disponíveis: {e}")
+            # Fallback: mostrar ativos configurados mesmo com erro
+            configured_assets = self.multi_asset_manager.assets
+            self.logger.info(f"ATIVOS CONFIGURADOS: {configured_assets}")
+
     def run(self):
         """Loop principal de execução"""
         if not self.connect():
@@ -231,7 +385,10 @@ Confiança: {signal['confidence']:.2f}
         self.running = True
         self.logger.info("Iniciando loop principal de trading...")
 
-        # LOG INICIAL DO STATUS DO MERCADO ← ADICIONE ESTE BLOCO
+        # LISTAR ATIVOS DISPONÍVEIS
+        self.list_available_assets()
+
+        # LOG INICIAL DO STATUS DO MERCADO
         self.log_market_status()
 
         check_interval = self.config.get('execution', {}).get('check_interval', 10)
@@ -255,45 +412,21 @@ Confiança: {signal['confidence']:.2f}
         finally:
             self.shutdown()
 
-        self.running = True
-        self.logger.info("Iniciando loop principal de trading...")
-
-        check_interval = self.config.get('execution', {}).get('check_interval', 10)
-
-        try:
-            while self.running:
-                start_time = time.time()
-
-                self.execute_trading_cycle()
-
-                # Calcular tempo de espera para próximo ciclo
-                elapsed = time.time() - start_time
-                sleep_time = max(1, check_interval - elapsed)
-
-                time.sleep(sleep_time)
-
-        except KeyboardInterrupt:
-            self.logger.info("Interrompido pelo usuário")
-        except Exception as e:
-            self.logger.error(f"Erro no loop principal: {e}")
-        finally:
-            self.shutdown()
-
     def log_market_status(self):
-        """Log do status de abertura dos ativos"""
+        """Log do status dos ativos - SEM VALIDAÇÃO DE MERCADO"""
         try:
-            asset = self.config['trading']['asset']
-            is_open = self.market_validator.is_asset_open(asset)
-            schedule = self.market_validator.get_asset_schedule(asset)
+            assets = self.multi_asset_manager.assets
 
-            status = "ABERTO" if is_open else "FECHADO"
-            self.logger.info(f"Status do mercado - Ativo: {asset}, Status: {status}")
+            self.logger.info("=== ATIVOS MONITORADOS ===")
 
-            if schedule:
-                self.logger.debug(f"Detalhes do horário: {schedule}")
+            for asset in assets:
+                # SEM verificação de abertura - assume todos abertos
+                self.logger.info(f"Ativo: {asset}")
+
+            self.logger.info("========================")
 
         except Exception as e:
-            self.logger.error(f"Erro ao verificar status do mercado: {e}")
+            self.logger.error(f"Erro ao listar ativos: {e}")
 
     def shutdown(self):
         """Encerra o trader de forma segura"""

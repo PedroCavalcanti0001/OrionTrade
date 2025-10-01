@@ -182,7 +182,7 @@ class MarketRegimeClassifier:
             return df
 
     def classify_regime(self, df: pd.DataFrame) -> MarketRegime:
-        """Classifica o regime de mercado - VERSÃO CORRIGIDA"""
+        """Classifica o regime de mercado - VERSÃO COM LIMIARES CORRETOS"""
 
         if len(df) < 10:
             return MarketRegime.CHOPPY
@@ -194,7 +194,6 @@ class MarketRegimeClassifier:
             required_values = ['adx', 'bb_width', 'ema_fast', 'ema_slow', 'plus_di', 'minus_di']
             for value in required_values:
                 if value not in current or pd.isna(current[value]):
-                    self.logger.warning(f"Valor {value} inválido ou faltando")
                     return MarketRegime.CHOPPY
 
             # Garantir que valores são numéricos
@@ -204,30 +203,72 @@ class MarketRegimeClassifier:
             ema_slow = float(current['ema_slow'])
             plus_di = float(current['plus_di'])
             minus_di = float(current['minus_di'])
+            atr_percent = (float(current['atr']) / float(current['close'])) * 100
 
-            # 1. Verificar Squeeze
-            bb_squeeze_threshold = self.analysis_config.get('bb_squeeze_threshold', 0.1)
-            if bb_width < bb_squeeze_threshold:
+            # 1. Verificar SQUEEZE - COM LIMIARES MAIS REALISTAS
+            bb_squeeze_threshold = self.analysis_config.get('bb_squeeze_threshold', 0.005)  # 0.5%
+            atr_squeeze_threshold = 0.1  # 0.1% de volatilidade
+
+            squeeze_conditions = (
+                    bb_width < bb_squeeze_threshold and
+                    atr_percent < atr_squeeze_threshold and
+                    adx < 15  # Tendência fraca
+            )
+
+            if squeeze_conditions:
                 return MarketRegime.SQUEEZE
 
-            # 2. Verificar Tendência
+            # 2. Verificar Tendência FORTE
             adx_threshold = self.analysis_config.get('adx_threshold', 25)
             adx_strong = adx > adx_threshold
 
-            uptrend_conditions = (ema_fast > ema_slow and plus_di > minus_di)
-            downtrend_conditions = (ema_fast < ema_slow and plus_di < minus_di)
+            uptrend_conditions = (
+                    ema_fast > ema_slow and
+                    plus_di > minus_di and
+                    current['close'] > current['bb_middle']  # Preço acima da média
+            )
+
+            downtrend_conditions = (
+                    ema_fast < ema_slow and
+                    plus_di < minus_di and
+                    current['close'] < current['bb_middle']  # Preço abaixo da média
+            )
 
             if adx_strong and uptrend_conditions:
                 return MarketRegime.UPTREND
             elif adx_strong and downtrend_conditions:
                 return MarketRegime.DOWNTREND
 
-            # 3. Mercado Lateral
-            if adx < 20:
+            # 3. Verificar Tendência FRACA/MODERADA
+            adx_moderate = adx > 15
+
+            if adx_moderate and uptrend_conditions:
+                return MarketRegime.UPTREND
+            elif adx_moderate and downtrend_conditions:
+                return MarketRegime.DOWNTREND
+
+            # 4. Mercado Lateral (RANGING)
+            ranging_conditions = (
+                    adx < 20 and  # Tendência fraca
+                    bb_width > 0.01 and  # Bandas com largura razoável
+                    abs(current['close'] - current['bb_middle']) / current['bb_middle'] < 0.01  # Preço próximo à média
+            )
+
+            if ranging_conditions:
                 return MarketRegime.RANGING
 
-            # 4. Default
-            return MarketRegime.CHOPPY
+            # 5. Mercado CHOPPY (condições perigosas)
+            choppy_conditions = (
+                    adx < 10 or  # Tendência muito fraca
+                    atr_percent > 0.5 or  # Volatilidade excessiva
+                    bb_width > 0.03  # Bandas muito largas (mercado instável)
+            )
+
+            if choppy_conditions:
+                return MarketRegime.CHOPPY
+
+            # 6. Default para RANGING
+            return MarketRegime.RANGING
 
         except Exception as e:
             self.logger.error(f"Erro na classificação: {e}")

@@ -1,18 +1,45 @@
 #!/usr/bin/env python3
 """
-OrionTrader - Sistema Adaptativo de Trading Algorítmico
+OrionTrader - Sistema Adaptativo de Trading Algorítmico Multi-Ativos
 Ponto de entrada principal do bot
 """
 
 import argparse
+import importlib
 import json
 import os
 import sys
-import importlib.util
+import threading
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Adiciona o diretório atual ao path do Python para resolver imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# CARREGAR .env
+load_dotenv()
+
+
+# SILENCIAR ERROS DE DIGITAL OPTIONS
+def silence_digital_errors():
+    """Silencia os erros específicos de digital options"""
+    original_excepthook = threading.excepthook
+
+    def custom_excepthook(args):
+        # Ignorar erros específicos de digital options
+        if (hasattr(args, 'exc_value') and
+                isinstance(args.exc_value, KeyError) and
+                str(args.exc_value) == "'underlying'"):
+            return  # Silencia este erro
+        # Ignorar erros de threads de digital options
+        if (hasattr(args, 'exc_type') and
+                hasattr(args, 'exc_value') and
+                "digital" in str(args.exc_value).lower()):
+            return
+        original_excepthook(args)
+
+    threading.excepthook = custom_excepthook
+
+
+# Aplicar o silenciamento
+silence_digital_errors()
 
 
 def load_module(module_path, class_name=None):
@@ -45,7 +72,7 @@ def load_config(config_path="config.json"):
 
 def main():
     """Função principal"""
-    parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo')
+    parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo Multi-Ativos')
     parser.add_argument('--mode', type=str, required=True,
                         choices=['demo', 'live', 'backtest'],
                         help='Modo de operação: demo, live ou backtest')
@@ -62,6 +89,9 @@ def main():
     setup_logger = None
 
     # Tentar diferentes caminhos de import
+    import importlib.util
+
+    # Carregar OrionTrader
     import_paths = [
         ('bot.trader.orion_trader', 'OrionTrader'),
         ('trader.orion_trader', 'OrionTrader'),
@@ -107,7 +137,7 @@ def main():
     if not OrionTrader or not setup_logger:
         print("ERRO: Não foi possível carregar os módulos necessários!")
         print("Verifique a estrutura de arquivos:")
-        print("Deve ter: trader/orion_trader.py OU bot/trader/orion_trader.py")
+        print("Deve ter: bot/trader/orion_trader.py OU trader/orion_trader.py")
         sys.exit(1)
 
     # Configurar logger
