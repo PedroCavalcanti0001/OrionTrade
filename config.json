@@ -1,6 +1,6 @@
 {
   "trading": {
-    "asset": "EURUSD-OTC",
+    "asset": "EURUSD",
     "timeframe": 60,
     "initial_balance": 1000.0,
     "risk_per_trade": 1.0,

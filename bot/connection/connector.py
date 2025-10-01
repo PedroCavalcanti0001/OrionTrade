@@ -22,7 +22,7 @@ class IQConnector:
         self.connected = False
 
     def connect(self) -> bool:
-        """Estabelece conexão com a IQ Option"""
+        """Estabelece conexão com a IQ Option - Versão Corrigida"""
         try:
             self.logger.info("Conectando à IQ Option...")
             self.api = IQ_Option(self.email, self.password)
@@ -39,6 +39,13 @@ class IQConnector:
                 self.api.change_balance("REAL")
             else:
                 self.api.change_balance("PRACTICE")
+
+            # CONFIGURAÇÃO PARA EVITAR ERROS DE DIGITAL OPTIONS ← ADICIONE ESTE BLOCO
+            try:
+                # Desativar funcionalidades de digital options se não forem necessárias
+                self.api.subscribe_strike_list = lambda *args, **kwargs: None
+            except:
+                pass
 
             self.connected = True
             self.logger.info("Conexão estabelecida com sucesso")

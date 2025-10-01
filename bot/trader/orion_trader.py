@@ -11,6 +11,7 @@ from bot.connection.connector import IQConnector
 from bot.connection.mock_connector import MockConnector
 from bot.analysis.strategy_selector import StrategySelector
 from bot.risk_management.risk_manager import RiskManager
+from bot.utils.market_hours import MarketHoursValidator
 
 
 class OrionTrader:
@@ -23,6 +24,9 @@ class OrionTrader:
 
         # Inicializar componentes
         self._initialize_components()
+
+        # INICIALIZAR VALIDADOR DE MERCADO ← ADICIONE ESTA LINHA
+        self.market_validator = MarketHoursValidator(self.connector, self.logger)
 
         # Estado do trader
         self.running = False
@@ -148,6 +152,9 @@ class OrionTrader:
             # 6. Verificar trades abertas
             self._check_open_trades()
 
+            # 7. Verificar trades abertas
+            self._check_open_trades()
+
         except Exception as e:
             self.logger.error(f"Erro no ciclo de trading: {e}")
 
@@ -224,6 +231,9 @@ Confiança: {signal['confidence']:.2f}
         self.running = True
         self.logger.info("Iniciando loop principal de trading...")
 
+        # LOG INICIAL DO STATUS DO MERCADO ← ADICIONE ESTE BLOCO
+        self.log_market_status()
+
         check_interval = self.config.get('execution', {}).get('check_interval', 10)
 
         try:
@@ -244,6 +254,46 @@ Confiança: {signal['confidence']:.2f}
             self.logger.error(f"Erro no loop principal: {e}")
         finally:
             self.shutdown()
+
+        self.running = True
+        self.logger.info("Iniciando loop principal de trading...")
+
+        check_interval = self.config.get('execution', {}).get('check_interval', 10)
+
+        try:
+            while self.running:
+                start_time = time.time()
+
+                self.execute_trading_cycle()
+
+                # Calcular tempo de espera para próximo ciclo
+                elapsed = time.time() - start_time
+                sleep_time = max(1, check_interval - elapsed)
+
+                time.sleep(sleep_time)
+
+        except KeyboardInterrupt:
+            self.logger.info("Interrompido pelo usuário")
+        except Exception as e:
+            self.logger.error(f"Erro no loop principal: {e}")
+        finally:
+            self.shutdown()
+
+    def log_market_status(self):
+        """Log do status de abertura dos ativos"""
+        try:
+            asset = self.config['trading']['asset']
+            is_open = self.market_validator.is_asset_open(asset)
+            schedule = self.market_validator.get_asset_schedule(asset)
+
+            status = "ABERTO" if is_open else "FECHADO"
+            self.logger.info(f"Status do mercado - Ativo: {asset}, Status: {status}")
+
+            if schedule:
+                self.logger.debug(f"Detalhes do horário: {schedule}")
+
+        except Exception as e:
+            self.logger.error(f"Erro ao verificar status do mercado: {e}")
 
     def shutdown(self):
         """Encerra o trader de forma segura"""
