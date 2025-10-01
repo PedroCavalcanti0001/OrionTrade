@@ -1,11 +1,13 @@
 """
 Classificador de Regime de Mercado
 """
-
+import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from typing import Dict, List, Tuple
 from enum import Enum
+
+from bot.utils.logger import setup_logger
 
 
 class MarketRegime(Enum):
@@ -21,48 +23,106 @@ class MarketRegimeClassifier:
     """Classifica o regime atual do mercado baseado em múltiplos indicadores"""
 
     def __init__(self, config: Dict):
+        self.logger = setup_logger()
         self.config = config
         self.analysis_config = config.get('analysis', {})
 
     def calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcula todas as features técnicas necessárias"""
+        """Calcula todas as features técnicas necessárias - Versão Robusta"""
 
-        # ADX - Força da tendência
-        adx_period = self.analysis_config.get('adx_period', 14)
-        adx_data = ta.adx(df['high'], df['low'], df['close'], length=adx_period)
-        df['adx'] = adx_data[f'ADX_{adx_period}']
-        df['plus_di'] = adx_data[f'DMP_{adx_period}']
-        df['minus_di'] = adx_data[f'DMN_{adx_period}']
+        try:
+            # Garantir que temos dados suficientes
+            if len(df) < 50:
+                self.logger.warning("Dados insuficientes para análise")
+                return df
 
-        # Bandas de Bollinger
-        bb_period = self.analysis_config.get('bb_period', 20)
-        bb_std = self.analysis_config.get('bb_std', 2)
-        bb_data = ta.bbands(df['close'], length=bb_period, std=bb_std)
-        df['bb_upper'] = bb_data[f'BBU_{bb_period}_{bb_std}.0']
-        df['bb_middle'] = bb_data[f'BBM_{bb_period}_{bb_std}.0']
-        df['bb_lower'] = bb_data[f'BBL_{bb_period}_{bb_std}.0']
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+            # Converter para numérico e limpar dados
+            for col in ['open', 'high', 'low', 'close']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # ATR - Volatilidade
-        atr_period = self.analysis_config.get('atr_period', 14)
-        atr_data = ta.atr(df['high'], df['low'], df['close'], length=atr_period)
-        df['atr'] = atr_data
+            df = df.dropna()
 
-        # Médias Móveis
-        ema_fast = self.analysis_config.get('ema_fast', 9)
-        ema_slow = self.analysis_config.get('ema_slow', 21)
-        df['ema_fast'] = ta.ema(df['close'], length=ema_fast)
-        df['ema_slow'] = ta.ema(df['close'], length=ema_slow)
+            # Configurações
+            adx_period = self.analysis_config.get('adx_period', 14)
+            bb_period = self.analysis_config.get('bb_period', 20)
+            bb_std = self.analysis_config.get('bb_std', 2)
+            atr_period = self.analysis_config.get('atr_period', 14)
+            ema_fast = self.analysis_config.get('ema_fast', 9)
+            ema_slow = self.analysis_config.get('ema_slow', 21)
+            rsi_period = self.analysis_config.get('rsi_period', 14)
 
-        # RSI
-        rsi_period = self.analysis_config.get('rsi_period', 14)
-        df['rsi'] = ta.rsi(df['close'], length=rsi_period)
+            # Calcular cada indicador individualmente com try/except
+            indicators = {}
 
-        # Volume (se disponível)
-        if 'volume' in df.columns:
-            df['volume_sma'] = ta.sma(df['volume'], length=20)
+            # 1. Bollinger Bands
+            try:
+                bb = ta.bbands(df['close'], length=bb_period, std=bb_std)
+                indicators['bb_upper'] = bb[f'BBU_{bb_period}_{bb_std}.0']
+                indicators['bb_middle'] = bb[f'BBM_{bb_period}_{bb_std}.0']
+                indicators['bb_lower'] = bb[f'BBL_{bb_period}_{bb_std}.0']
+            except Exception as e:
+                self.logger.warning(f"Bollinger Bands falhou: {e}")
+                # Fallback manual
+                rolling_mean = df['close'].rolling(window=bb_period).mean()
+                rolling_std = df['close'].rolling(window=bb_period).std()
+                indicators['bb_upper'] = rolling_mean + (rolling_std * bb_std)
+                indicators['bb_middle'] = rolling_mean
+                indicators['bb_lower'] = rolling_mean - (rolling_std * bb_std)
 
-        return df
+            # 2. ADX
+            try:
+                adx_data = ta.adx(df['high'], df['low'], df['close'], length=adx_period)
+                indicators['adx'] = adx_data[f'ADX_{adx_period}']
+                indicators['plus_di'] = adx_data[f'DMP_{adx_period}']
+                indicators['minus_di'] = adx_data[f'DMN_{adx_period}']
+            except Exception as e:
+                self.logger.warning(f"ADX falhou: {e}")
+                indicators['adx'] = 25.0
+                indicators['plus_di'] = 25.0
+                indicators['minus_di'] = 25.0
+
+            # 3. ATR
+            try:
+                indicators['atr'] = ta.atr(df['high'], df['low'], df['close'], length=atr_period)
+            except Exception as e:
+                self.logger.warning(f"ATR falhou: {e}")
+                indicators['atr'] = (df['high'] - df['low']).rolling(window=atr_period).mean()
+
+            # 4. EMAs
+            try:
+                indicators['ema_fast'] = ta.ema(df['close'], length=ema_fast)
+                indicators['ema_slow'] = ta.ema(df['close'], length=ema_slow)
+            except Exception as e:
+                self.logger.warning(f"EMA falhou: {e}")
+                indicators['ema_fast'] = df['close'].ewm(span=ema_fast).mean()
+                indicators['ema_slow'] = df['close'].ewm(span=ema_slow).mean()
+
+            # 5. RSI
+            try:
+                indicators['rsi'] = ta.rsi(df['close'], length=rsi_period)
+            except Exception as e:
+                self.logger.warning(f"RSI falhou: {e}")
+                indicators['rsi'] = 50.0
+
+            # Adicionar todos os indicadores ao DataFrame
+            for name, values in indicators.items():
+                df[name] = values
+
+            # Calcular largura das Bandas de Bollinger
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+
+
+            df = df.ffill().bfill()
+
+            # Garantir que não há valores infinitos
+            df = df.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Erro crítico em calculate_features: {e}")
+            # Retornar DataFrame original se tudo falhar
+            return df
 
     def classify_regime(self, df: pd.DataFrame) -> MarketRegime:
         """Classifica o regime de mercado baseado nas features calculadas"""
