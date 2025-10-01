@@ -1,0 +1,181 @@
+2025-10-01 12:49:58 | ERROR    | __main__:main:124 - Erro fatal: Credenciais IQ Option não encontradas nas variáveis de ambiente
+2025-10-01 12:50:33 | ERROR    | __main__:main:124 - Erro fatal: Credenciais IQ Option não encontradas nas variáveis de ambiente
+2025-10-01 12:51:01 | ERROR    | __main__:main:124 - Erro fatal: Credenciais IQ Option não encontradas nas variáveis de ambiente
+2025-10-01 12:54:47 | ERROR    | __main__:main:124 - Erro fatal: Credenciais IQ Option não encontradas nas variáveis de ambiente
+2025-10-01 13:07:15 | ERROR    | __main__:main:124 - Erro fatal: Credenciais IQ Option não encontradas nas variáveis de ambiente
+2025-10-01 13:08:28 | INFO     | bot.trader.orion_trader:__init__:32 - OrionTrader inicializado no modo demo
+2025-10-01 13:08:28 | INFO     | bot.trader.orion_trader:connect:61 - Conectando à plataforma...
+2025-10-01 13:08:28 | INFO     | bot.connection.connector:connect:27 - Conectando à IQ Option...
+2025-10-01 13:08:31 | INFO     | bot.connection.connector:connect:44 - Conexão estabelecida com sucesso
+2025-10-01 13:08:31 | INFO     | bot.trader.orion_trader:run:187 - Iniciando loop principal de trading...
+2025-10-01 13:08:32 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:08:42 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:08:52 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:02 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:12 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:22 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:32 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:42 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:09:52 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:02 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:12 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:22 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:32 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:42 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:10:52 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:11:02 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:11:12 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:114 - Erro no ciclo de trading: 'high'
+2025-10-01 13:11:13 | INFO     | bot.trader.orion_trader:run:204 - Interrompido pelo usuário
+2025-10-01 13:11:13 | INFO     | bot.trader.orion_trader:shutdown:212 - Encerrando OrionTrader...
+2025-10-01 13:11:13 | ERROR    | __main__:main:124 - Erro fatal: 'IQ_Option' object has no attribute 'close'
+2025-10-01 13:11:15 | INFO     | bot.trader.orion_trader:__init__:32 - OrionTrader inicializado no modo demo
+2025-10-01 13:11:15 | INFO     | bot.trader.orion_trader:connect:61 - Conectando à plataforma...
+2025-10-01 13:11:15 | INFO     | bot.connection.connector:connect:27 - Conectando à IQ Option...
+2025-10-01 13:11:18 | INFO     | bot.connection.connector:connect:44 - Conexão estabelecida com sucesso
+2025-10-01 13:11:18 | INFO     | bot.trader.orion_trader:run:225 - Iniciando loop principal de trading...
+2025-10-01 13:11:19 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:19 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        2.959432e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.175110e+00
+close     1.175345e+00
+min       1.175065e+00
+max       1.175355e+00
+volume    3.230000e+02
+high      1.175345e+00
+low       1.175345e+00
+Name: 0, dtype: float64
+2025-10-01 13:11:19 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:19 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329120  2959432  1759329120  ...  1.175345  1.175345
+1759329180  2959433  1759329180  ...  1.175310  1.175310
+
+[2 rows x 11 columns]
+2025-10-01 13:11:23 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'
+2025-10-01 13:11:29 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:29 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        2.959432e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.175110e+00
+close     1.175345e+00
+min       1.175065e+00
+max       1.175355e+00
+volume    3.230000e+02
+high      1.175345e+00
+low       1.175345e+00
+Name: 0, dtype: float64
+2025-10-01 13:11:29 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:29 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329120  2959432  1759329120  ...  1.175345  1.175345
+1759329180  2959433  1759329180  ...  1.175310  1.175310
+
+[2 rows x 11 columns]
+2025-10-01 13:11:29 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'
+2025-10-01 13:11:39 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:39 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        2.959432e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.175110e+00
+close     1.175345e+00
+min       1.175065e+00
+max       1.175355e+00
+volume    3.230000e+02
+high      1.175345e+00
+low       1.175345e+00
+Name: 0, dtype: float64
+2025-10-01 13:11:39 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:11:39 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329120  2959432  1759329120  ...  1.175345  1.175345
+1759329180  2959433  1759329180  ...  1.175310  1.175310
+
+[2 rows x 11 columns]
+2025-10-01 13:11:39 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'
+2025-10-01 13:11:46 | INFO     | bot.trader.orion_trader:run:242 - Interrompido pelo usuário
+2025-10-01 13:11:46 | INFO     | bot.trader.orion_trader:shutdown:250 - Encerrando OrionTrader...
+2025-10-01 13:11:46 | ERROR    | __main__:main:124 - Erro fatal: 'IQ_Option' object has no attribute 'close'
+2025-10-01 13:11:49 | INFO     | bot.trader.orion_trader:__init__:32 - OrionTrader inicializado no modo demo
+2025-10-01 13:11:49 | INFO     | bot.trader.orion_trader:connect:61 - Conectando à plataforma...
+2025-10-01 13:11:49 | INFO     | bot.connection.connector:connect:27 - Conectando à IQ Option...
+2025-10-01 13:11:52 | INFO     | bot.connection.connector:connect:44 - Conexão estabelecida com sucesso
+2025-10-01 13:11:52 | INFO     | bot.trader.orion_trader:run:225 - Iniciando loop principal de trading...
+2025-10-01 13:11:52 | WARNING  | bot.trader.orion_trader:get_market_data:73 - Nenhum dado de mercado obtido
+2025-10-01 13:11:52 | WARNING  | bot.trader.orion_trader:execute_trading_cycle:119 - Dados de mercado vazios, aguardando próximo ciclo
+2025-10-01 13:12:02 | WARNING  | bot.trader.orion_trader:get_market_data:73 - Nenhum dado de mercado obtido
+2025-10-01 13:12:02 | WARNING  | bot.trader.orion_trader:execute_trading_cycle:119 - Dados de mercado vazios, aguardando próximo ciclo
+2025-10-01 13:12:04 | INFO     | bot.trader.orion_trader:run:242 - Interrompido pelo usuário
+2025-10-01 13:12:04 | INFO     | bot.trader.orion_trader:shutdown:250 - Encerrando OrionTrader...
+2025-10-01 13:12:04 | ERROR    | __main__:main:124 - Erro fatal: 'IQ_Option' object has no attribute 'close'
+2025-10-01 13:12:06 | INFO     | bot.trader.orion_trader:__init__:32 - OrionTrader inicializado no modo demo
+2025-10-01 13:12:06 | INFO     | bot.trader.orion_trader:connect:61 - Conectando à plataforma...
+2025-10-01 13:12:06 | INFO     | bot.connection.connector:connect:27 - Conectando à IQ Option...
+2025-10-01 13:12:08 | INFO     | bot.connection.connector:connect:44 - Conexão estabelecida com sucesso
+2025-10-01 13:12:08 | INFO     | bot.trader.orion_trader:run:225 - Iniciando loop principal de trading...
+2025-10-01 13:12:09 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:09 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        4.139577e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.197705e+00
+close     1.196935e+00
+min       1.196395e+00
+max       1.197865e+00
+volume    0.000000e+00
+high      1.196935e+00
+low       1.196935e+00
+Name: 0, dtype: float64
+2025-10-01 13:12:09 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:09 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329180  4139577  1759329180  ...  1.196935  1.196935
+1759329240  4139578  1759329240  ...  1.197755  1.197755
+
+[2 rows x 11 columns]
+2025-10-01 13:12:09 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'
+2025-10-01 13:12:19 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:19 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        4.139577e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.197705e+00
+close     1.196935e+00
+min       1.196395e+00
+max       1.197865e+00
+volume    0.000000e+00
+high      1.196935e+00
+low       1.196935e+00
+Name: 0, dtype: float64
+2025-10-01 13:12:19 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:19 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329180  4139577  1759329180  ...  1.196935  1.196935
+1759329240  4139578  1759329240  ...  1.197755  1.197755
+
+[2 rows x 11 columns]
+2025-10-01 13:12:19 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'
+2025-10-01 13:12:29 | DEBUG    | bot.trader.orion_trader:get_market_data:80 - Colunas recebidas: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:29 | DEBUG    | bot.trader.orion_trader:get_market_data:81 - Primeira linha: id        4.139577e+06
+from      1.759329e+09
+at        1.759329e+18
+to        1.759329e+09
+open      1.197705e+00
+close     1.196935e+00
+min       1.196395e+00
+max       1.197865e+00
+volume    0.000000e+00
+high      1.196935e+00
+low       1.196935e+00
+Name: 0, dtype: float64
+2025-10-01 13:12:29 | INFO     | bot.trader.orion_trader:execute_trading_cycle:124 - Colunas no DataFrame: ['id', 'from', 'at', 'to', 'open', 'close', 'min', 'max', 'volume', 'high', 'low']
+2025-10-01 13:12:29 | INFO     | bot.trader.orion_trader:execute_trading_cycle:125 - Primeiras linhas:\n                 id        from  ...      high       low
+timestamp                        ...                    
+1759329180  4139577  1759329180  ...  1.196935  1.196935
+1759329240  4139578  1759329240  ...  1.197755  1.197755
+
+[2 rows x 11 columns]
+2025-10-01 13:12:29 | ERROR    | bot.trader.orion_trader:execute_trading_cycle:152 - Erro no ciclo de trading: 'BBU_20_2.0'

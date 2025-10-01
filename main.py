@@ -1,88 +1,129 @@
+#!/usr/bin/env python3
+"""
+OrionTrader - Sistema Adaptativo de Trading Algorítmico
+Ponto de entrada principal do bot
+"""
+
+import argparse
+import json
 import os
-import logging
-import time
-from iqoptionapi.stable_api import IQ_Option
+import sys
+import importlib.util
+from pathlib import Path
 
-# Configura o logging para ver as mensagens da API
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+# Adiciona o diretório atual ao path do Python para resolver imports
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_bot():
-    """
-    Função principal que executa o bot de teste.
-    """
-    # --- 1. Obter Credenciais das Variáveis de Ambiente ---
-    email = os.getenv('IQ_EMAIL')
-    senha = os.getenv('IQ_PASSWORD')
+def load_module(module_path, class_name=None):
+    """Carrega módulos dinamicamente para evitar problemas de import"""
+    try:
+        spec = importlib.util.spec_from_file_location(module_path, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if class_name:
+            return getattr(module, class_name)
+        return module
+    except Exception as e:
+        print(f"Erro ao carregar módulo {module_path}: {e}")
+        return None
 
-    if not email or not senha:
-        print("Erro: As variáveis de ambiente IQ_EMAIL e IQ_PASSWORD não foram definidas.")
-        print("Por favor, configure-as antes de executar o script.")
-        return
 
-    print("--- Iniciando Bot de Teste da IQ Option API ---")
+def load_config(config_path="config.json"):
+    """Carrega configuração do arquivo JSON"""
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Erro: Arquivo de configuração {config_path} não encontrado.")
+        print("Copie config.json.example para config.json e ajuste as configurações.")
+        sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"Erro: Arquivo de configuração {config_path} contém JSON inválido.")
+        sys.exit(1)
 
-    # --- 2. Conectar à API ---
-    # Você pode precisar ajustar o host se a conexão falhar. Ex: "wss://ws.eu.iqoption.com/echo/websocket"
-    api = IQ_Option(email, senha)
-    conectado, razao = api.connect()
 
-    if not conectado:
-        print(f"Falha na conexão. Razão: {razao}")
-        return
+def main():
+    """Função principal"""
+    parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo')
+    parser.add_argument('--mode', type=str, required=True,
+                        choices=['demo', 'live', 'backtest'],
+                        help='Modo de operação: demo, live ou backtest')
+    parser.add_argument('--config', type=str, default='config.json',
+                        help='Caminho para o arquivo de configuração')
 
-    print("✅ Conectado com sucesso!")
+    args = parser.parse_args()
+
+    # Carregar configurações
+    config = load_config(args.config)
+
+    # Tentar carregar os módulos de forma flexível
+    OrionTrader = None
+    setup_logger = None
+
+    # Tentar diferentes caminhos de import
+    import_paths = [
+        ('bot.trader.orion_trader', 'OrionTrader'),
+        ('trader.orion_trader', 'OrionTrader'),
+        ('orion_trader', 'OrionTrader'),
+    ]
+
+    logger_paths = [
+        'bot.utils.logger',
+        'utils.logger',
+        'logger'
+    ]
+
+    # Carregar OrionTrader
+    for module_path, class_name in import_paths:
+        try:
+            if '.' in module_path:
+                module = __import__(module_path, fromlist=[class_name])
+                OrionTrader = getattr(module, class_name)
+            else:
+                module = __import__(module_path)
+                OrionTrader = getattr(module, class_name)
+            print(f"✓ OrionTrader carregado de: {module_path}")
+            break
+        except ImportError as e:
+            print(f"✗ Falha ao carregar de {module_path}: {e}")
+            continue
+
+    # Carregar setup_logger
+    for module_path in logger_paths:
+        try:
+            if '.' in module_path:
+                module = __import__(module_path, fromlist=['setup_logger'])
+                setup_logger = getattr(module, 'setup_logger')
+            else:
+                module = __import__(module_path)
+                setup_logger = getattr(module, 'setup_logger')
+            print(f"✓ Logger carregado de: {module_path}")
+            break
+        except ImportError as e:
+            print(f"✗ Falha ao carregar logger de {module_path}: {e}")
+            continue
+
+    if not OrionTrader or not setup_logger:
+        print("ERRO: Não foi possível carregar os módulos necessários!")
+        print("Verifique a estrutura de arquivos:")
+        print("Deve ter: trader/orion_trader.py OU bot/trader/orion_trader.py")
+        sys.exit(1)
+
+    # Configurar logger
+    logger = setup_logger()
 
     try:
-        # --- 3. Mudar para a Conta de Treinamento (MUITO IMPORTANTE) ---
-        print("🔄 Alterando para a conta de TREINAMENTO (PRACTICE)...")
-        api.change_balance('PRACTICE')
+        # Inicializar e executar o trader
+        trader = OrionTrader(config, args.mode, logger)
+        trader.run()
 
-        # --- 4. Obter e Exibir o Saldo ---
-        saldo = api.get_balance()
-        print(f"💰 Saldo da conta de treinamento: ${saldo:,.2f}")
-
-        # --- 5. Obter Dados de um Ativo ---
-        ativo = "EURUSD-op"
-        print(f"📈 Obtendo dados para o ativo: {ativo}...")
-
-        # Obtém as últimas velas para verificar o preço
-        velas = api.get_candles(ativo, 60, 5, time.time())
-        if velas:
-            preco_atual = velas[-1]['close']
-            print(f"📊 Preço de fechamento da última vela de 1 min: {preco_atual}")
-        else:
-            print(f"Não foi possível obter dados para {ativo}. Talvez o mercado esteja fechado.")
-            # Para testes fora do horário de mercado, use ativos OTC. Ex: "EURUSD-OTC"
-            ativo = "EURUSD-OTC"
-            print(f"Tentando com o ativo {ativo}...")
-
-        # --- 6. Realizar uma Operação de Teste ---
-        valor_entrada = 1  # Valor em dólares para a operação
-        direcao = "call"  # "call" (sobe) ou "put" (desce)
-        expiracao = 1  # Duração em minutos
-
-        print(
-            f"🤖 Realizando uma operação de teste: {direcao} de ${valor_entrada} em {ativo} com expiração de {expiracao} minuto(s)...")
-
-        check, order_id = api.buy(valor_entrada, ativo, direcao, expiracao)
-
-        if check:
-            print(f"✅ Operação de teste enviada com sucesso! ID do pedido: {order_id}")
-            # Espera o resultado (opcional)
-            resultado = api.check_win_v4(order_id)
-            print(f"🤑 Resultado da operação: Lucro de ${resultado[1]:,.2f}")
-        else:
-            print("❌ Falha ao enviar a operação de teste.")
-
+    except KeyboardInterrupt:
+        logger.info("Bot interrompido pelo usuário")
     except Exception as e:
-        print(f"Ocorreu um erro durante a execução: {e}")
-
-    finally:
-        # --- 7. Desconectar ---
-        print("--- Desconectando da API ---")
-        api.disconnect()
+        logger.error(f"Erro fatal: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    run_bot()
+    main()

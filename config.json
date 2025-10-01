@@ -1,0 +1,27 @@
+{
+  "trading": {
+    "asset": "EURUSD-OTC",
+    "timeframe": 60,
+    "initial_balance": 1000.0,
+    "risk_per_trade": 1.0,
+    "max_open_trades": 3,
+    "stop_loss_atr_multiplier": 1.5,
+    "take_profit_atr_multiplier": 2.0
+  },
+  "analysis": {
+    "adx_period": 14,
+    "adx_threshold": 25,
+    "bb_period": 20,
+    "bb_std": 2,
+    "bb_squeeze_threshold": 0.1,
+    "atr_period": 14,
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "rsi_period": 14
+  },
+  "execution": {
+    "check_interval": 10,
+    "max_retries": 3,
+    "retry_delay": 5
+  }
+}
