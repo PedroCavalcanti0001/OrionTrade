@@ -24,9 +24,9 @@ def setup_logger(log_level=None):
             final_level = get_log_level()
             print(f"Usando nível de log global: {final_level}")
         except:
-            final_level = "INFO"
+            final_level = "DEBUG"
     else:
-        final_level = "INFO"
+        final_level = "DEBUG"
 
     print(f"Logger configurado com nível: {final_level}")
 
@@ -60,5 +60,5 @@ def get_current_log_level():
         try:
             return get_log_level()
         except:
-            return "INFO"
-    return "INFO"
+            return "DEBUG"
+    return "DEBUG"

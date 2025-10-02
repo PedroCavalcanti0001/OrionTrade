@@ -12,16 +12,16 @@
   },
   "analysis": {
     "adx_period": 10,
-    "adx_threshold": 25,
+    "adx_threshold": 22,
     "bb_period": 14,
     "bb_std": 1.5,
-    "bb_squeeze_threshold": 0.008,
+    "bb_squeeze_threshold": 0.02,
     "atr_period": 10,
     "ema_fast": 7,
     "ema_slow": 14,
     "rsi_period": 10,
-    "rsi_overbought": 65,
-    "rsi_oversold": 35
+    "rsi_overbought": 70,
+    "rsi_oversold": 30
   },
   "execution": {
     "check_interval": 10,

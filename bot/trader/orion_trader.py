@@ -14,6 +14,7 @@ from bot.risk_management.risk_manager import RiskManager
 from bot.utils.market_hours import MarketHoursValidator
 from bot.trader.multi_asset_manager import MultiAssetManager
 
+
 class OrionTrader:
     """Classe principal que orquestra todo o sistema de trading"""
 
@@ -116,7 +117,7 @@ class OrionTrader:
                     self._execute_trade(signal)
 
             # 6. Verificar trades abertas
-            #self._check_open_trades()
+            # self._check_open_trades()
 
         except Exception as e:
             self.logger.error(f"Erro no ciclo de trading: {e}")
@@ -167,7 +168,7 @@ class OrionTrader:
         return True
 
     def _execute_trade(self, signal: Dict):
-        """Executa uma trade para um ativo específico"""
+        """Executa uma trade para um ativo específico - VERSÃO CORRIGIDA"""
         try:
             asset = signal['asset']
             direction = 'call' if signal['direction'] == 'LONG' else 'put'
@@ -178,11 +179,11 @@ class OrionTrader:
             )
 
             # Colocar ordem
-            order_id = self.connector.place_order(
-                asset=asset,
-                direction=direction,
-                amount=position_size,
-                expiration=1
+            order_id = self.connector.api.buy(
+                position_size,
+                asset,
+                direction,
+                1
             )
 
             if order_id:
@@ -200,37 +201,18 @@ class OrionTrader:
                 self.multi_asset_manager.update_trade_count(asset, +1)
 
                 self.logger.info(
-                    f"Trade executada - Ativo: {asset}, "
+                    f"🎯 TRADE EXECUTADA - Ativo: {asset}, "
                     f"Direção: {direction}, "
                     f"Valor: ${position_size:.2f}, "
-                    f"Regime: {signal['regime'].value}"
+                    f"Regime: {signal['regime'].value}, "
+                    f"Confiança: {signal['confidence']:.2f}"
                 )
+
+            else:
+                self.logger.error(f"Falha ao executar ordem para {asset}")
 
         except Exception as e:
             self.logger.error(f"Erro ao executar trade para {asset}: {e}")
-
-    def _check_open_trades(self):
-        """Verifica e atualiza trades abertas de todos os ativos"""
-        completed_trades = []
-
-        for trade in self.open_trades:
-            order_id = trade['order_id']
-            asset = trade['asset']
-
-            result = self.connector.check_win(order_id)
-
-            if result is not None:  # Trade finalizada
-                completed_trades.append(trade)
-                outcome = "GANHOU" if result else "PERDEU"
-
-                self.logger.info(f"Trade {order_id} ({asset}) finalizada: {outcome}")
-
-                # Atualizar contador do ativo
-                self.multi_asset_manager.update_trade_count(asset, -1)
-
-        # Remover trades finalizadas
-        for trade in completed_trades:
-            self.open_trades.remove(trade)
 
     def _log_market_analysis(self, signal: Dict):
         """Registra análise de mercado detalhada"""
@@ -249,36 +231,6 @@ Ação: {signal['action']} {signal['direction'] or ''}
 Confiança: {signal['confidence']:.2f}
 ==========================
         """)
-
-    def _execute_trade(self, df: pd.DataFrame, signal: Dict):
-        """Executa uma trade baseada no sinal"""
-        try:
-            asset = self.config['trading']['asset']
-            direction = 'call' if signal['direction'] == 'LONG' else 'put'
-
-            # Calcular tamanho da posição
-            position_size = self.risk_manager.calculate_position_size(
-                self.balance, signal['confidence']
-            )
-
-            # Colocar ordem
-            order_id = self.connector.place_order(
-                asset=asset,
-                direction=direction,
-                amount=position_size,
-                expiration=1  # 1 minuto para day trade
-            )
-
-            if order_id:
-                self.open_trades.append(order_id)
-                self.logger.info(f"Trade executada - ID: {order_id}, Direção: {direction}, Valor: ${position_size:.2f}")
-
-                # Log de métricas de risco
-                risk_metrics = self.risk_manager.get_risk_metrics(df, self.balance)
-                self.logger.info(f"Métricas de Risco: {risk_metrics}")
-
-        except Exception as e:
-            self.logger.error(f"Erro ao executar trade: {e}")
 
     def _check_open_trades(self):
         """Verifica e atualiza trades abertas"""

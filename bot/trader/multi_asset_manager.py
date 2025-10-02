@@ -98,27 +98,28 @@ class MultiAssetManager:
             self.logger.error(f"Erro ao obter dados para {asset}: {e}")
             return pd.DataFrame()
 
-
     def analyze_all_assets(self) -> Dict[str, Dict]:
-        """Analisa todos os ativos e retorna sinais"""
+        """Analisa todos os ativos e retorna sinais - VERSÃO CORRIGIDA"""
         all_signals = {}
 
         for asset in self.assets:
             try:
-                #
-                # Verificar se o ativo está aberto
-                #if hasattr(self.connector, 'market_validator'):
-                #    if not self.connector.market_validator.is_asset_open(asset):
-                #        self.logger.debug(f"Ativo {asset} está FECHADO, pulando...")
-                #        continue
-
                 # Obter dados do ativo
                 df = self.get_market_data_for_asset(asset)
-                if df.empty:
+
+                # ✅ VERIFICAÇÃO ROBUSTA
+                if df is None or df.empty:
+                    self.logger.debug(f"Dados vazios para {asset}, pulando...")
                     continue
 
                 # Gerar sinal
                 signal = self.strategy_selector.get_trading_signal(df)
+
+                # ✅ VERIFICAÇÃO DO SINAL
+                if signal is None:
+                    self.logger.debug(f"Sinal None para {asset}, pulando...")
+                    continue
+
                 signal['asset'] = asset
 
                 # Calcular prioridade
@@ -130,6 +131,7 @@ class MultiAssetManager:
 
                 all_signals[asset] = signal
 
+                # ✅ CORREÇÃO: Usar logger.debug diretamente (sem isEnabledFor)
                 self.logger.debug(f"Análise {asset}: {signal['regime'].value} - Prioridade: {priority_score:.2f}")
 
             except Exception as e:
@@ -139,7 +141,7 @@ class MultiAssetManager:
         return all_signals
 
     def calculate_priority_score(self, signal: Dict, asset: str) -> float:
-        """Calcula pontuação de prioridade para o ativo"""
+        """Calcula pontuação de prioridade para o ativo - VERSÃO CORRIGIDA"""
         score = 0.0
 
         # Baseado no regime
@@ -147,19 +149,21 @@ class MultiAssetManager:
             'UPTREND': 0.9,
             'DOWNTREND': 0.9,
             'RANGING': 0.7,
-            'SQUEEZE': 0.8,
+            'SQUEEZE': 0.8,  # SQUEEZE tem boa prioridade
             'CHOPPY': 0.1
         }
 
         regime = signal['regime'].value
         score += regime_scores.get(regime, 0.5)
 
-        # Baseado na confiança do sinal
-        score += signal.get('confidence', 0.0) * 0.5
+        # Baseado na confiança do sinal - USAR A CONFIANÇA REAL AGORA
+        confidence = signal.get('confidence', 0.0)
+        score += confidence * 0.5  # Peso maior para confiança
 
         # Baseado no número de trades abertas no ativo
         open_trades = self.asset_states[asset]['open_trades']
-        if open_trades >= self.max_trades_per_asset:
+        max_per_asset = self.config['trading'].get('max_trades_per_asset', 1)
+        if open_trades >= max_per_asset:
             score *= 0.1  # Reduz drasticamente se já tem trades abertas
 
         # Baseado no RSI (evitar extremos)

@@ -43,7 +43,7 @@ def run_bot():
         print(f"💰 Saldo da conta de treinamento: ${saldo:,.2f}")
 
         # --- 5. Obter Dados de um Ativo ---
-        ativo = "EURUSD-op"
+        ativo = "GBPUSD-OTC"
         print(f"📈 Obtendo dados para o ativo: {ativo}...")
 
         # Obtém as últimas velas para verificar o preço
@@ -54,7 +54,7 @@ def run_bot():
         else:
             print(f"Não foi possível obter dados para {ativo}. Talvez o mercado esteja fechado.")
             # Para testes fora do horário de mercado, use ativos OTC. Ex: "EURUSD-OTC"
-            ativo = "EURUSD-OTC"
+            ativo = "GBPUSD-OTC"
             print(f"Tentando com o ativo {ativo}...")
 
         # --- 6. Realizar uma Operação de Teste ---

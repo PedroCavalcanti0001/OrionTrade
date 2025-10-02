@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # VARIÁVEL GLOBAL para nível de logging
-log_level = "INFO"  # Valor padrão
+log_level = "DEBUG"  # Valor padrão
 
 
 # SILENCIAR ERROS DE DIGITAL OPTIONS
