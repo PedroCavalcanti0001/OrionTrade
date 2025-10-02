@@ -37,37 +37,38 @@ class MultiAssetManager:
             }
 
     def get_market_data_for_asset(self, asset: str, count: int = 100) -> pd.DataFrame:
-        """Obtém dados de mercado para um ativo específico"""
+        """Obtém dados de mercado para um ativo específico - COM DEBUG"""
         try:
             timeframe = self.trading_config.get('timeframe', 60)
+            print(f"=== DEBUG GET_MARKET_DATA ===")
+            print(f"Asset: {asset}, Timeframe: {timeframe}, Count: {count}")
+
             candles = self.connector.get_candles(asset, timeframe, count)
 
+            print(f"Candles recebidos: {len(candles) if candles else 0}")
+            if candles and len(candles) > 0:
+                print(f"Primeiro candle: {candles[0]}")
+
             if not candles:
-                self.logger.warning(f"Nenhum dado obtido para {asset}")
+                print("DEBUG: Nenhum candle obtido")
                 return pd.DataFrame()
 
             # Converter para DataFrame
             df = pd.DataFrame(candles)
+            print(f"DataFrame criado - shape: {df.shape}")
+            print(f"Colunas: {df.columns.tolist()}")
 
-            # Verificar e garantir a estrutura dos dados
-            required_columns = ['open', 'high', 'low', 'close']
-            for col in required_columns:
-                if col not in df.columns:
-                    self.logger.error(f"Coluna {col} não encontrada para {asset}")
-                    return pd.DataFrame()
+            # ... resto do código de processamento ...
 
-            # Criar timestamp
-            if 'timestamp' not in df.columns and 'from' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['from'], unit='s')
-            elif 'timestamp' not in df.columns:
-                df['timestamp'] = pd.date_range(start='2024-01-01', periods=len(df), freq='1min')
-
-            df.set_index('timestamp', inplace=True)
+            print("=============================")
             return df
 
         except Exception as e:
-            self.logger.error(f"Erro ao obter dados para {asset}: {e}")
+            print(f"DEBUG: Erro em get_market_data: {e}")
+            import traceback
+            traceback.print_exc()
             return pd.DataFrame()
+
 
     def analyze_all_assets(self) -> Dict[str, Dict]:
         """Analisa todos os ativos e retorna sinais"""

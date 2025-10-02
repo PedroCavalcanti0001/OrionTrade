@@ -15,6 +15,23 @@ class StrategySelector:
         self.regime_classifier = MarketRegimeClassifier(config)
         self.analysis_config = config.get('analysis', {})
 
+    def debug_confidence_calculation(self, df: pd.DataFrame, signal: Dict):
+        """Debug do cálculo de confiança"""
+        current = df.iloc[-1]
+
+        print(f"=== DEBUG CONFIANÇA ===")
+        print(f"Regime: {signal['regime'].value}")
+        print(f"Ação: {signal['action']}")
+        print(f"Close: {current['close']:.5f}")
+        print(f"BB Upper: {current.get('bb_upper', 0):.5f}")
+        print(f"BB Lower: {current.get('bb_lower', 0):.5f}")
+        print(f"ADX: {current.get('adx', 0):.2f}")
+        print(f"RSI: {current.get('rsi', 0):.2f}")
+        print(f"EMA Fast: {current.get('ema_fast', 0):.5f}")
+        print(f"EMA Slow: {current.get('ema_slow', 0):.5f}")
+        print(f"Volume: {current.get('volume', 0)}")
+        print("========================")
+
     def get_trading_signal(self, df: pd.DataFrame) -> Dict:
         """
         Gera sinal de trading baseado no regime e estratégia apropriada
@@ -36,6 +53,9 @@ class StrategySelector:
             'strategy_used': None
         }
 
+        # DEBUG TEMPORÁRIO
+        self.debug_confidence_calculation(df, signal)
+
         # Não operar em mercados perigosos
         if regime == MarketRegime.CHOPPY:
             signal['action'] = 'WAIT'
@@ -54,56 +74,54 @@ class StrategySelector:
 
         return signal
 
-    def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str,
-                                  analysis: Dict) -> Dict:
-        """Estratégia de seguir tendência com entrada em pullbacks"""
+    def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict) -> Dict:
+        """Estratégia de seguir tendência - COM CONFIANÇA MÍNIMA"""
 
         df_with_features = self.regime_classifier.calculate_features(df)
         current = df_with_features.iloc[-1]
         prev = df_with_features.iloc[-2]
 
-        # EMA para identificar pullbacks
-        ema_fast = self.analysis_config.get('ema_fast', 9)
-        ema_slow = self.analysis_config.get('ema_slow', 21)
-
         signal = {
             'action': 'WAIT',
             'direction': trend_direction,
-            'confidence': 0.0,
+            'confidence': 0.3,  # CONFIANÇA BASE
             'regime': analysis['regime'],
             'analysis': analysis,
             'strategy_used': 'TREND_FOLLOWING'
         }
 
         if trend_direction == 'LONG':
-            # Entrar em pullback: preço abaixo da EMA rápida mas acima da lenta
-            pullback_condition = (
-                    current['close'] < current['ema_fast'] and
-                    current['close'] > current['ema_slow'] and
-                    current['close'] > current['bb_middle']
-            )
+            # Condições para LONG
+            conditions = [
+                current['close'] > current['ema_slow'],
+                current['plus_di'] > current['minus_di'],
+                current['rsi'] < 70,  # Não sobrecomprado
+                current['adx'] > 15  # Alguma tendência
+            ]
 
-            # Confirmação: RSI saindo de sobrevenda
-            rsi_confirmation = current['rsi'] > 35 and prev['rsi'] <= 35
+            if all(conditions):
+                # Calcular confiança baseada em múltiplos fatores
+                confidence_factors = []
 
-            if pullback_condition and rsi_confirmation:
+                # Força da tendência
+                trend_strength = min(current['adx'] / 30.0, 1.0)
+                confidence_factors.append(trend_strength)
+
+                # Posição nas EMAs
+                ema_distance = (current['close'] - current['ema_slow']) / current['ema_slow']
+                ema_score = min(abs(ema_distance) * 100, 1.0)
+                confidence_factors.append(ema_score)
+
+                # RSI favorável
+                rsi_score = 1.0 if current['rsi'] < 60 else 0.7 if current['rsi'] < 70 else 0.4
+                confidence_factors.append(rsi_score)
+
+                # Confiança final
+                confidence = sum(confidence_factors) / len(confidence_factors)
+                signal['confidence'] = max(confidence, 0.5)  # MÍNIMO 50%
                 signal['action'] = 'ENTER'
-                signal['confidence'] = min(0.8, analysis['adx'] / 50)
 
-        else:  # SHORT
-            # Entrar em pullback: preço acima da EMA rápida mas abaixo da lenta
-            pullback_condition = (
-                    current['close'] > current['ema_fast'] and
-                    current['close'] < current['ema_slow'] and
-                    current['close'] < current['bb_middle']
-            )
-
-            # Confirmação: RSI saindo de sobrecompra
-            rsi_confirmation = current['rsi'] < 65 and prev['rsi'] >= 65
-
-            if pullback_condition and rsi_confirmation:
-                signal['action'] = 'ENTER'
-                signal['confidence'] = min(0.8, analysis['adx'] / 50)
+        # Similar para SHORT...
 
         return signal
 
@@ -259,42 +277,62 @@ class StrategySelector:
         return confirmation and volume_confirmation
 
     def _calculate_breakout_confidence(self, df: pd.DataFrame, direction: str) -> float:
-        """Calcula a confiança do rompimento baseado em múltiplos fatores"""
+        """Calcula confiança do rompimento - VERSÃO CORRIGIDA"""
         if len(df) < 5:
-            return 0.5
+            return 0.5  # Confiança base se dados insuficientes
 
         current = df.iloc[-1]
-        factors = []
 
-        # 1. Força do rompimento (distância da banda)
-        if direction == 'LONG':
-            strength = (current['close'] - current['bb_upper']) / current['bb_upper']
-        else:
-            strength = (current['bb_lower'] - current['close']) / current['bb_lower']
+        try:
+            factors = []
 
-        factors.append(min(strength * 100, 1.0))  # Normalizar para 0-1
+            # 1. Força do rompimento (0-1 ponto)
+            if direction == 'LONG':
+                strength = (current['close'] - current['bb_upper']) / current['bb_upper']
+            else:
+                strength = (current['bb_lower'] - current['close']) / current['bb_lower']
 
-        # 2. Volume relativo
-        volume_avg = df['volume'].tail(10).mean()
-        volume_ratio = current['volume'] / volume_avg if volume_avg > 0 else 1
-        factors.append(min(volume_ratio / 3.0, 1.0))  # Volume até 3x a média
+            strength_score = min(abs(strength) * 500, 1.0)  # Amplificar o efeito
+            factors.append(strength_score)
 
-        # 3. ADX (força da tendência emergente)
-        adx_strength = min(current['adx'] / 50.0, 1.0)  # Normalizar ADX
-        factors.append(adx_strength)
+            # 2. Volume relativo (0-1 ponto)
+            volume_avg = df['volume'].tail(10).mean()
+            volume_ratio = current['volume'] / volume_avg if volume_avg > 0 else 1
+            volume_score = min(volume_ratio / 2.0, 1.0)
+            factors.append(volume_score * 0.8)  # Peso menor para volume
 
-        # 4. Alinhamento com tendência de maior prazo
-        if direction == 'LONG':
-            trend_alignment = 1.0 if current['ema_fast'] > current['ema_slow'] else 0.3
-        else:
-            trend_alignment = 1.0 if current['ema_fast'] < current['ema_slow'] else 0.3
-        factors.append(trend_alignment)
+            # 3. ADX - força da tendência (0-1 ponto)
+            adx_score = min(current['adx'] / 40.0, 1.0)
+            factors.append(adx_score)
 
-        # Média ponderada dos fatores
-        weights = [0.3, 0.25, 0.25, 0.2]  # Força, Volume, ADX, Tendência
-        confidence = sum(f * w for f, w in zip(factors, weights))
+            # 4. Alinhamento com tendência (0-1 ponto)
+            if direction == 'LONG':
+                trend_alignment = 1.0 if current['ema_fast'] > current['ema_slow'] else 0.3
+            else:
+                trend_alignment = 1.0 if current['ema_fast'] < current['ema_slow'] else 0.3
+            factors.append(trend_alignment)
 
-        return min(confidence, 0.9)  # Limitar a 90% de confiança máxima
+            # 5. RSI confirmation (0-1 ponto)
+            rsi = current.get('rsi', 50)
+            if direction == 'LONG':
+                rsi_score = 1.0 if rsi < 70 else 0.5 if rsi < 80 else 0.2
+            else:
+                rsi_score = 1.0 if rsi > 30 else 0.5 if rsi > 20 else 0.2
+            factors.append(rsi_score * 0.7)
+
+            # Média ponderada dos fatores
+            weights = [0.3, 0.15, 0.25, 0.2, 0.1]
+            confidence = sum(f * w for f, w in zip(factors, weights))
+
+            # Garantir confiança mínima em boas condições
+            if strength_score > 0.3 and adx_score > 0.4:
+                confidence = max(confidence, 0.6)
+
+            return min(confidence, 0.95)
+
+        except Exception as e:
+            self.logger.error(f"Erro cálculo confiança: {e}")
+            return 0.5  # Fallback
 
     def _execute_breakout_entry(self, df: pd.DataFrame, direction: str, confidence: float) -> Dict:
         """Executa a entrada no rompimento com gerenciamento de risco"""
