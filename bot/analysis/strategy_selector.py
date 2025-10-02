@@ -5,12 +5,14 @@ Seletor de Estratégias Baseado no Regime
 import pandas as pd
 from typing import Dict, Optional, Tuple
 from .regime_classifier import MarketRegime, MarketRegimeClassifier
+from ..utils.logger import setup_logger
 
 
 class StrategySelector:
     """Seleciona e executa estratégias baseadas no regime de mercado"""
 
     def __init__(self, config: Dict):
+        self.logger = setup_logger()
         self.config = config
         self.regime_classifier = MarketRegimeClassifier(config)
         self.analysis_config = config.get('analysis', {})
@@ -19,18 +21,18 @@ class StrategySelector:
         """Debug do cálculo de confiança"""
         current = df.iloc[-1]
 
-        print(f"=== DEBUG CONFIANÇA ===")
-        print(f"Regime: {signal['regime'].value}")
-        print(f"Ação: {signal['action']}")
-        print(f"Close: {current['close']:.5f}")
-        print(f"BB Upper: {current.get('bb_upper', 0):.5f}")
-        print(f"BB Lower: {current.get('bb_lower', 0):.5f}")
-        print(f"ADX: {current.get('adx', 0):.2f}")
-        print(f"RSI: {current.get('rsi', 0):.2f}")
-        print(f"EMA Fast: {current.get('ema_fast', 0):.5f}")
-        print(f"EMA Slow: {current.get('ema_slow', 0):.5f}")
-        print(f"Volume: {current.get('volume', 0)}")
-        print("========================")
+        self.logger.debug(f"=== DEBUG CONFIANÇA ===")
+        self.logger.debug(f"Regime: {signal['regime'].value}")
+        self.logger.debug(f"Ação: {signal['action']}")
+        self.logger.debug(f"Close: {current['close']:.5f}")
+        self.logger.debug(f"BB Upper: {current.get('bb_upper', 0):.5f}")
+        self.logger.debug(f"BB Lower: {current.get('bb_lower', 0):.5f}")
+        self.logger.debug(f"ADX: {current.get('adx', 0):.2f}")
+        self.logger.debug(f"RSI: {current.get('rsi', 0):.2f}")
+        self.logger.debug(f"EMA Fast: {current.get('ema_fast', 0):.5f}")
+        self.logger.debug(f"EMA Slow: {current.get('ema_slow', 0):.5f}")
+        self.logger.debug(f"Volume: {current.get('volume', 0)}")
+        self.logger.debug("========================")
 
     def get_trading_signal(self, df: pd.DataFrame) -> Dict:
         """
@@ -75,55 +77,87 @@ class StrategySelector:
         return signal
 
     def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict) -> Dict:
-        """Estratégia de seguir tendência - COM CONFIANÇA MÍNIMA"""
+        """Estratégia de seguir tendência - CONFIANÇA CORRIGIDA"""
 
         df_with_features = self.regime_classifier.calculate_features(df)
+
+        if df_with_features.empty or len(df_with_features) < 2:
+            return self._get_wait_signal(analysis, 'TREND_FOLLOWING')
+
         current = df_with_features.iloc[-1]
-        prev = df_with_features.iloc[-2]
 
         signal = {
             'action': 'WAIT',
             'direction': trend_direction,
-            'confidence': 0.3,  # CONFIANÇA BASE
+            'confidence': 0.3,
             'regime': analysis['regime'],
             'analysis': analysis,
             'strategy_used': 'TREND_FOLLOWING'
         }
 
+        # Verificar condições básicas - CORREÇÃO DA SINTAXE
+        basic_conditions = [
+            current.get('adx', 0) > 15,
+            30 <= current.get('rsi', 50) <= 70,  # CORREÇÃO AQUI - usando operadores de comparação
+            analysis['trend_direction'].lower() == trend_direction.lower()
+        ]
+
+        if not all(basic_conditions):
+            return signal
+
+        # Calcular confiança baseada em múltiplos fatores
+        confidence_factors = []
+
+        # Força da tendência (ADX)
+        adx_score = min(current.get('adx', 0) / 40.0, 1.0)
+        confidence_factors.append(adx_score * 0.3)
+
+        # Alinhamento de EMAs
         if trend_direction == 'LONG':
-            # Condições para LONG
-            conditions = [
-                current['close'] > current['ema_slow'],
-                current['plus_di'] > current['minus_di'],
-                current['rsi'] < 70,  # Não sobrecomprado
-                current['adx'] > 15  # Alguma tendência
-            ]
+            ema_score = 1.0 if current.get('ema_fast', 0) > current.get('ema_slow', 0) else 0.3
+        else:
+            ema_score = 1.0 if current.get('ema_fast', 0) < current.get('ema_slow', 0) else 0.3
+        confidence_factors.append(ema_score * 0.3)
 
-            if all(conditions):
-                # Calcular confiança baseada em múltiplos fatores
-                confidence_factors = []
+        # RSI favorável
+        rsi = current.get('rsi', 50)
+        if trend_direction == 'LONG':
+            rsi_score = 1.0 if rsi < 60 else 0.7 if rsi < 70 else 0.3
+        else:
+            rsi_score = 1.0 if rsi > 40 else 0.7 if rsi > 30 else 0.3
+        confidence_factors.append(rsi_score * 0.2)
 
-                # Força da tendência
-                trend_strength = min(current['adx'] / 30.0, 1.0)
-                confidence_factors.append(trend_strength)
+        # Posição nas Bandas de Bollinger
+        bb_position = analysis.get('bb_position', 'Central')
+        if (trend_direction == 'LONG' and bb_position == 'Inferior') or \
+                (trend_direction == 'SHORT' and bb_position == 'Superior'):
+            bb_score = 1.0
+        else:
+            bb_score = 0.5
+        confidence_factors.append(bb_score * 0.2)
 
-                # Posição nas EMAs
-                ema_distance = (current['close'] - current['ema_slow']) / current['ema_slow']
-                ema_score = min(abs(ema_distance) * 100, 1.0)
-                confidence_factors.append(ema_score)
+        # Confiança final
+        final_confidence = sum(confidence_factors)
 
-                # RSI favorável
-                rsi_score = 1.0 if current['rsi'] < 60 else 0.7 if current['rsi'] < 70 else 0.4
-                confidence_factors.append(rsi_score)
-
-                # Confiança final
-                confidence = sum(confidence_factors) / len(confidence_factors)
-                signal['confidence'] = max(confidence, 0.5)  # MÍNIMO 50%
-                signal['action'] = 'ENTER'
-
-        # Similar para SHORT...
+        # Aplicar confiança mínima baseada no regime
+        if final_confidence >= 0.5:
+            signal.update({
+                'action': 'ENTER',
+                'confidence': min(final_confidence, 0.95)
+            })
 
         return signal
+
+    def _get_wait_signal(self, analysis: Dict, strategy: str) -> Dict:
+        """Retorna sinal de espera padrão"""
+        return {
+            'action': 'WAIT',
+            'direction': None,
+            'confidence': 0.0,
+            'regime': analysis['regime'],
+            'analysis': analysis,
+            'strategy_used': strategy
+        }
 
     def _mean_reversion_strategy(self, df: pd.DataFrame, analysis: Dict) -> Dict:
         """Estratégia de reversão à média em mercado lateral"""

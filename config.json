@@ -12,7 +12,7 @@
   },
   "analysis": {
     "adx_period": 10,
-    "adx_threshold": 20,
+    "adx_threshold": 25,
     "bb_period": 14,
     "bb_std": 1.5,
     "bb_squeeze_threshold": 0.008,
@@ -24,7 +24,7 @@
     "rsi_oversold": 35
   },
   "execution": {
-    "check_interval": 5,
+    "check_interval": 10,
     "max_retries": 3,
     "retry_delay": 2,
     "timeout": 15

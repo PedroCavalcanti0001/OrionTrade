@@ -16,6 +16,9 @@ from dotenv import load_dotenv
 # CARREGAR .env
 load_dotenv()
 
+# VARIÁVEL GLOBAL para nível de logging
+log_level = "INFO"  # Valor padrão
+
 
 # SILENCIAR ERROS DE DIGITAL OPTIONS
 def silence_digital_errors():
@@ -70,16 +73,41 @@ def load_config(config_path="config.json"):
         sys.exit(1)
 
 
+def get_log_level():
+    """Retorna o nível de logging global"""
+    global log_level
+    return log_level
+
+
+def set_log_level(level):
+    """Define o nível de logging global"""
+    global log_level
+    log_level = level
+    print(f"Log level definido globalmente para: {log_level}")
+
+
 def main():
     """Função principal"""
+    global log_level  # Declarar como global para modificar a variável externa
+
     parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo Multi-Ativos')
     parser.add_argument('--mode', type=str, required=True,
                         choices=['demo', 'live', 'backtest'],
                         help='Modo de operação: demo, live ou backtest')
     parser.add_argument('--config', type=str, default='config.json',
                         help='Caminho para o arquivo de configuração')
-
+    parser.add_argument(
+        '--log-level',
+        type=str,
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        default='INFO',
+        help='Nível de logging: DEBUG, INFO, WARNING, ERROR, CRITICAL (padrão: INFO)'
+    )
     args = parser.parse_args()
+
+    # DEFINIR VARIÁVEL GLOBAL
+    log_level = args.log_level
+    print(f"Variável global log_level definida para: {log_level}")
 
     # Carregar configurações
     config = load_config(args.config)
@@ -140,12 +168,16 @@ def main():
         print("Deve ter: bot/trader/orion_trader.py OU trader/orion_trader.py")
         sys.exit(1)
 
-    # Configurar logger
-    logger = setup_logger()
+    # Configurar logger usando a variável global
+    logger = setup_logger(log_level=log_level)
 
     try:
         # Inicializar e executar o trader
         trader = OrionTrader(config, args.mode, logger)
+
+        # Verificar se a variável global está acessível
+        print(f"Log level global antes de executar: {log_level}")
+
         trader.run()
 
     except KeyboardInterrupt:

@@ -30,20 +30,20 @@ class MarketRegimeClassifier:
     def calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calcula todas as features técnicas - VERSÃO CORRIGIDA"""
 
-        print(f"=== DEBUG CALCULATE_FEATURES ===")
-        print(f"DataFrame shape: {df.shape}")
+        self.logger.debug(f"=== DEBUG CALCULATE_FEATURES ===")
+        self.logger.debug(f"DataFrame shape: {df.shape}")
 
         try:
             # VERIFICAÇÃO INICIAL
             if df.empty or len(df) < 20:
-                print("DEBUG: DataFrame vazio ou insuficiente")
+                self.logger.debug("DEBUG: DataFrame vazio ou insuficiente")
                 return df
 
             # Verificar colunas necessárias
             required_columns = ['open', 'high', 'low', 'close']
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                print(f"DEBUG: Colunas faltando: {missing_columns}")
+                self.logger.debug(f"DEBUG: Colunas faltando: {missing_columns}")
                 return df
 
             # Criar cópia
@@ -57,10 +57,10 @@ class MarketRegimeClassifier:
             df = df.dropna()
 
             if len(df) < 20:
-                print("DEBUG: Dados insuficientes após limpeza")
+                self.logger.debug("DEBUG: Dados insuficientes após limpeza")
                 return df
 
-            print(f"DEBUG: Dados válidos - shape: {df.shape}")
+            self.logger.debug(f"DEBUG: Dados válidos - shape: {df.shape}")
 
             # CONFIGURAÇÕES
             bb_period = 20
@@ -72,7 +72,7 @@ class MarketRegimeClassifier:
 
             # 1. BANDAS DE BOLLINGER - CÁLCULO MANUAL GARANTIDO
             try:
-                print("DEBUG: Calculando Bollinger Bands...")
+                self.logger.debug("DEBUG: Calculando Bollinger Bands...")
                 rolling_mean = df['close'].rolling(window=bb_period).mean()
                 rolling_std = df['close'].rolling(window=bb_period).std()
                 rolling_std = rolling_std.fillna(0.001)  # Evitar std zero
@@ -81,9 +81,9 @@ class MarketRegimeClassifier:
                 df['bb_middle'] = rolling_mean
                 df['bb_lower'] = rolling_mean - (rolling_std * 2)
                 df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
-                print(f"DEBUG: BB calculado - Upper: {df['bb_upper'].iloc[-1]:.5f}")
+                self.logger.debug(f"DEBUG: BB calculado - Upper: {df['bb_upper'].iloc[-1]:.5f}")
             except Exception as e:
-                print(f"DEBUG: Erro BB: {e}")
+                self.logger.debug(f"DEBUG: Erro BB: {e}")
                 # Fallback
                 df['bb_upper'] = df['close'] * 1.02
                 df['bb_middle'] = df['close']
@@ -92,18 +92,18 @@ class MarketRegimeClassifier:
 
             # 2. EMAs - CÁLCULO MANUAL GARANTIDO
             try:
-                print("DEBUG: Calculando EMAs...")
+                self.logger.debug("DEBUG: Calculando EMAs...")
                 df['ema_fast'] = df['close'].ewm(span=ema_fast, adjust=False).mean()
                 df['ema_slow'] = df['close'].ewm(span=ema_slow, adjust=False).mean()
-                print(f"DEBUG: EMA calculado - Fast: {df['ema_fast'].iloc[-1]:.5f}")
+                self.logger.debug(f"DEBUG: EMA calculado - Fast: {df['ema_fast'].iloc[-1]:.5f}")
             except Exception as e:
-                print(f"DEBUG: Erro EMA: {e}")
+                self.logger.debug(f"DEBUG: Erro EMA: {e}")
                 df['ema_fast'] = df['close'].rolling(window=ema_fast).mean()
                 df['ema_slow'] = df['close'].rolling(window=ema_slow).mean()
 
             # 3. RSI - CÁLCULO MANUAL GARANTIDO
             try:
-                print("DEBUG: Calculando RSI...")
+                self.logger.debug("DEBUG: Calculando RSI...")
                 delta = df['close'].diff()
                 gain = delta.where(delta > 0, 0).fillna(0)
                 loss = (-delta.where(delta < 0, 0)).fillna(0)
@@ -114,14 +114,14 @@ class MarketRegimeClassifier:
 
                 rs = avg_gain / avg_loss
                 df['rsi'] = 100 - (100 / (1 + rs))
-                print(f"DEBUG: RSI calculado: {df['rsi'].iloc[-1]:.2f}")
+                self.logger.debug(f"DEBUG: RSI calculado: {df['rsi'].iloc[-1]:.2f}")
             except Exception as e:
-                print(f"DEBUG: Erro RSI: {e}")
+                self.logger.debug(f"DEBUG: Erro RSI: {e}")
                 df['rsi'] = 50.0
 
             # 4. ATR - CÁLCULO MANUAL GARANTIDO
             try:
-                print("DEBUG: Calculando ATR...")
+                self.logger.debug("DEBUG: Calculando ATR...")
                 high_low = df['high'] - df['low']
                 high_close_prev = abs(df['high'] - df['close'].shift(1))
                 low_close_prev = abs(df['low'] - df['close'].shift(1))
@@ -132,14 +132,14 @@ class MarketRegimeClassifier:
 
                 true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
                 df['atr'] = true_range.rolling(window=atr_period, min_periods=1).mean()
-                print(f"DEBUG: ATR calculado: {df['atr'].iloc[-1]:.5f}")
+                self.logger.debug(f"DEBUG: ATR calculado: {df['atr'].iloc[-1]:.5f}")
             except Exception as e:
-                print(f"DEBUG: Erro ATR: {e}")
+                self.logger.debug(f"DEBUG: Erro ATR: {e}")
                 df['atr'] = (df['high'] - df['low']).rolling(window=atr_period).mean()
 
             # 5. ADX SIMPLIFICADO - CÁLCULO MANUAL GARANTIDO
             try:
-                print("DEBUG: Calculando ADX...")
+                self.logger.debug(" Calculando ADX...")
                 # Baseado na volatilidade e tendência
                 volatility = df['close'].pct_change().abs().rolling(window=5, min_periods=1).mean() * 100
                 trend_strength = abs(df['ema_fast'] - df['ema_slow']) / df['close'] * 100
@@ -153,9 +153,9 @@ class MarketRegimeClassifier:
                 df['plus_di'] = (price_changes > 0).rolling(window=adx_period, min_periods=1).mean() * 100
                 df['minus_di'] = (price_changes < 0).rolling(window=adx_period, min_periods=1).mean() * 100
 
-                print(f"DEBUG: ADX calculado: {df['adx'].iloc[-1]:.2f}")
+                self.logger.debug(f"DEBUG: ADX calculado: {df['adx'].iloc[-1]:.2f}")
             except Exception as e:
-                print(f"DEBUG: Erro ADX: {e}")
+                self.logger.debug(f"DEBUG: Erro ADX: {e}")
                 df['adx'] = 25.0
                 df['plus_di'] = 30.0
                 df['minus_di'] = 30.0
@@ -181,20 +181,20 @@ class MarketRegimeClassifier:
                             df[col] = df['close']
 
             # DEBUG FINAL
-            print("DEBUG: Indicadores calculados:")
-            print(f"BB Upper: {df['bb_upper'].iloc[-1]:.5f}")
-            print(f"BB Lower: {df['bb_lower'].iloc[-1]:.5f}")
-            print(f"ADX: {df['adx'].iloc[-1]:.2f}")
-            print(f"RSI: {df['rsi'].iloc[-1]:.2f}")
-            print(f"EMA Fast: {df['ema_fast'].iloc[-1]:.5f}")
-            print(f"EMA Slow: {df['ema_slow'].iloc[-1]:.5f}")
-            print(f"ATR: {df['atr'].iloc[-1]:.5f}")
-            print("=============================")
+            self.logger.debug("Indicadores calculados:")
+            self.logger.debug(f"BB Upper: {df['bb_upper'].iloc[-1]:.5f}")
+            self.logger.debug(f"BB Lower: {df['bb_lower'].iloc[-1]:.5f}")
+            self.logger.debug(f"ADX: {df['adx'].iloc[-1]:.2f}")
+            self.logger.debug(f"RSI: {df['rsi'].iloc[-1]:.2f}")
+            self.logger.debug(f"EMA Fast: {df['ema_fast'].iloc[-1]:.5f}")
+            self.logger.debug(f"EMA Slow: {df['ema_slow'].iloc[-1]:.5f}")
+            self.logger.debug(f"ATR: {df['atr'].iloc[-1]:.5f}")
+            self.logger.debug("=============================")
 
             return df
 
         except Exception as e:
-            print(f"DEBUG: Erro crítico em calculate_features: {e}")
+            self.logger.debug(f"DEBUG: Erro crítico em calculate_features: {e}")
             import traceback
             traceback.print_exc()
             # Retornar fallback mínimo

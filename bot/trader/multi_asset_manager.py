@@ -37,36 +37,65 @@ class MultiAssetManager:
             }
 
     def get_market_data_for_asset(self, asset: str, count: int = 100) -> pd.DataFrame:
-        """Obtém dados de mercado para um ativo específico - COM DEBUG"""
+        """Obtém dados de mercado para um ativo específico - VERSÃO COMPLETA"""
         try:
             timeframe = self.trading_config.get('timeframe', 60)
-            print(f"=== DEBUG GET_MARKET_DATA ===")
-            print(f"Asset: {asset}, Timeframe: {timeframe}, Count: {count}")
 
             candles = self.connector.get_candles(asset, timeframe, count)
 
-            print(f"Candles recebidos: {len(candles) if candles else 0}")
-            if candles and len(candles) > 0:
-                print(f"Primeiro candle: {candles[0]}")
-
             if not candles:
-                print("DEBUG: Nenhum candle obtido")
+                self.logger.debug(f"Nenhum candle obtido para {asset}")
                 return pd.DataFrame()
 
             # Converter para DataFrame
             df = pd.DataFrame(candles)
-            print(f"DataFrame criado - shape: {df.shape}")
-            print(f"Colunas: {df.columns.tolist()}")
 
-            # ... resto do código de processamento ...
+            # VERIFICAÇÃO CRÍTICA: garantir colunas necessárias
+            required_columns = ['open', 'high', 'low', 'close']
 
-            print("=============================")
+            # Verificar se as colunas existem com nomes alternativos
+            column_mapping = {
+                'min': 'low',
+                'max': 'high'
+            }
+
+            for old_name, new_name in column_mapping.items():
+                if old_name in df.columns and new_name not in df.columns:
+                    df[new_name] = df[old_name]
+
+            # Garantir que todas as colunas necessárias existem
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                self.logger.error(f"Colunas faltando para {asset}: {missing_columns}")
+                return pd.DataFrame()
+
+            # Processar timestamp
+            if 'timestamp' not in df.columns and 'from' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['from'], unit='s')
+            elif 'timestamp' not in df.columns:
+                # Criar timestamp sequencial se não existir
+                df['timestamp'] = pd.date_range(
+                    start=datetime.now(),
+                    periods=len(df),
+                    freq=f'{timeframe}min'
+                )
+
+            # Garantir que os dados são numéricos
+            for col in required_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            # Remover NaNs
+            df = df.dropna()
+
+            if df.empty:
+                self.logger.warning(f"Dados insuficientes para {asset} após limpeza")
+                return pd.DataFrame()
+
+            df.set_index('timestamp', inplace=True)
             return df
 
         except Exception as e:
-            print(f"DEBUG: Erro em get_market_data: {e}")
-            import traceback
-            traceback.print_exc()
+            self.logger.error(f"Erro ao obter dados para {asset}: {e}")
             return pd.DataFrame()
 
 

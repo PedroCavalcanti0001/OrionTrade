@@ -62,8 +62,6 @@ class OrionTrader:
         else:
             raise ValueError(f"Modo inválido: {self.mode}")
 
-        # INICIALIZAR MARKET VALIDATOR ← ADICIONE ESTA LINHA
-        from bot.utils.market_hours import MarketHoursValidator
         self.connector.market_validator = MarketHoursValidator(self.connector, self.logger)
 
         # Inicializar outros componentes
@@ -76,53 +74,22 @@ class OrionTrader:
         return self.connector.connect()
 
     def get_market_data(self) -> pd.DataFrame:
-        """Obtém e formata dados de mercado"""
-        asset = self.config['trading']['asset']
-        timeframe = self.config['trading']['timeframe']
+        """Obtém e formata dados de mercado - VERSÃO SIMPLIFICADA"""
+        try:
+            asset = self.config['trading']['asset']
+            timeframe = self.config['trading']['timeframe']
 
-        # Obter candles suficientes para análise
-        candles = self.connector.get_candles(asset, timeframe, 100)
+            # Usar o multi_asset_manager para obter dados
+            df = self.multi_asset_manager.get_market_data_for_asset(asset, 100)
 
-        if not candles:
-            self.logger.warning("Nenhum dado de mercado obtido")
+            if df.empty:
+                self.logger.warning(f"Nenhum dado válido obtido para {asset}")
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Erro crítico ao obter dados de mercado: {e}")
             return pd.DataFrame()
-
-        # Converter para DataFrame
-        df = pd.DataFrame(candles)
-
-        # VERIFICAÇÃO CRÍTICA: Log da estrutura dos dados
-        self.logger.debug(f"Colunas recebidas: {df.columns.tolist()}")
-        self.logger.debug(f"Primeira linha: {df.iloc[0] if len(df) > 0 else 'DF vazio'}")
-
-        # Garantir que as colunas necessárias existem
-        required_columns = ['open', 'high', 'low', 'close']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-
-        if missing_columns:
-            self.logger.error(f"Colunas faltando: {missing_columns}")
-            self.logger.error(f"Colunas disponíveis: {df.columns.tolist()}")
-            return pd.DataFrame()
-
-        # Renomear colunas se necessário (caso a API use nomes diferentes)
-        column_mapping = {
-            'from': 'timestamp',
-            'min': 'low',
-            'max': 'high'
-        }
-
-        for old_name, new_name in column_mapping.items():
-            if old_name in df.columns and new_name not in df.columns:
-                df[new_name] = df[old_name]
-
-        # Criar timestamp se necessário
-        if 'timestamp' not in df.columns and 'from' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['from'], unit='s')
-        elif 'timestamp' not in df.columns:
-            df['timestamp'] = pd.date_range(start='2024-01-01', periods=len(df), freq='1min')
-
-        df.set_index('timestamp', inplace=True)
-
-        return df
 
     def execute_trading_cycle(self):
         """Executa um ciclo completo de trading multi-ativos"""
