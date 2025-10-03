@@ -179,14 +179,14 @@ class OrionTrader:
             )
 
             # Colocar ordem
-            order_id = self.connector.api.buy(
+            result, order_id = self.connector.api.buy(
                 position_size,
                 asset,
                 direction,
                 1
             )
 
-            if order_id:
+            if result:
                 # Registrar trade com informações do ativo
                 trade_info = {
                     'order_id': order_id,
@@ -209,7 +209,7 @@ class OrionTrader:
                 )
 
             else:
-                self.logger.error(f"Falha ao executar ordem para {asset}")
+                self.logger.error(f"Falha ao executar ordem para {asset}: {order_id}")
 
         except Exception as e:
             self.logger.error(f"Erro ao executar trade para {asset}: {e}")

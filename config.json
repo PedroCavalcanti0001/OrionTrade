@@ -1,6 +1,6 @@
 {
   "trading": {
-    "assets": ["EURUSD-OTC", "GBPUSD-OTC", "USDJPY-OTC"],
+    "assets": ["EURUSD-op", "GBPUSD-op", "USDJPY-op"],
     "timeframe": 1,
     "initial_balance": 1000.0,
     "risk_per_trade": 2.0,
