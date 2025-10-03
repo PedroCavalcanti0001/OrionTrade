@@ -37,7 +37,6 @@ class MultiAssetManager:
             }
 
     def get_market_data_for_asset(self, asset: str, count: int = 100) -> pd.DataFrame:
-        """Obtém dados de mercado para um ativo específico - VERSÃO COMPLETA"""
         try:
             timeframe = self.trading_config.get('timeframe', 60)
 
@@ -47,11 +46,21 @@ class MultiAssetManager:
                 self.logger.debug(f"Nenhum candle obtido para {asset}")
                 return pd.DataFrame()
 
+            # ✅ CORREÇÃO: Gerar volume artificial se volume for 0
+            for candle in candles:
+                if 'volume' not in candle or candle.get('volume', 0) == 0:
+                    # Gerar volume baseado na volatilidade do candle
+                    price_range = candle.get('max', candle.get('high', 1.0)) - candle.get('min', candle.get('low', 1.0))
+                    base_volume = 1000  # Volume base
+                    volatility_multiplier = max(1.0, price_range * 10000)  # Multiplicador baseado na volatilidade
+                    candle['volume'] = int(base_volume * volatility_multiplier)
+                    self.logger.debug(f"Volume artificial gerado para {asset}: {candle['volume']}")
+
             # Converter para DataFrame
             df = pd.DataFrame(candles)
 
             # VERIFICAÇÃO CRÍTICA: garantir colunas necessárias
-            required_columns = ['open', 'high', 'low', 'close']
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
 
             # Verificar se as colunas existem com nomes alternativos
             column_mapping = {
