@@ -7,8 +7,6 @@ import pandas_ta as ta
 from typing import Dict, List, Tuple
 from enum import Enum
 
-from bot.utils.logger import setup_logger
-
 
 class MarketRegime(Enum):
     """Enumeração dos regimes de mercado"""
@@ -22,8 +20,8 @@ class MarketRegime(Enum):
 class MarketRegimeClassifier:
     """Classifica o regime atual do mercado baseado em múltiplos indicadores"""
 
-    def __init__(self, config: Dict):
-        self.logger = setup_logger()
+    def __init__(self, config: Dict, logger):
+        self.logger = logger
         self.config = config
         self.analysis_config = config.get('analysis', {})
 

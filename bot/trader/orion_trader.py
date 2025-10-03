@@ -11,6 +11,7 @@ from bot.connection.connector import IQConnector
 from bot.connection.mock_connector import MockConnector
 from bot.analysis.strategy_selector import StrategySelector
 from bot.risk_management.risk_manager import RiskManager
+from bot.trader.performance_tracker import PerformanceTracker
 from bot.utils.market_hours import MarketHoursValidator
 from bot.trader.multi_asset_manager import MultiAssetManager
 
@@ -22,6 +23,10 @@ class OrionTrader:
         self.config = config
         self.mode = mode
         self.logger = logger
+
+        # ✅ INICIALIZAR PERFORMANCE TRACKER
+        self.performance_tracker = PerformanceTracker(logger)
+        self.performance_summary = {}  # Armazena o resumo do desempenho
 
         # Inicializar componentes
         self._initialize_components()
@@ -50,7 +55,7 @@ class OrionTrader:
         # Inicializar conector
         if self.mode == 'backtest':
             initial_balance = trading_config.get('initial_balance', 1000.0)
-            self.connector = MockConnector(initial_balance)
+            self.connector = MockConnector(initial_balance, logger=self.logger)
         elif self.mode in ['demo', 'live']:
             email = os.getenv('IQ_EMAIL')
             password = os.getenv('IQ_PASSWORD')
@@ -59,15 +64,15 @@ class OrionTrader:
                 raise ValueError("Credenciais IQ Option não encontradas nas variáveis de ambiente")
 
             account_type = 'PRACTICE' if self.mode == 'demo' else 'REAL'
-            self.connector = IQConnector(email, password, account_type)
+            self.connector = IQConnector(email, password, account_type, logger=self.logger)
         else:
             raise ValueError(f"Modo inválido: {self.mode}")
 
         self.connector.market_validator = MarketHoursValidator(self.connector, self.logger)
 
         # Inicializar outros componentes
-        self.strategy_selector = StrategySelector(self.config)
-        self.risk_manager = RiskManager(self.config)
+        self.strategy_selector = StrategySelector(self.config, self.logger)
+        self.risk_manager = RiskManager(self.config, self.logger)
 
     def connect(self) -> bool:
         """Estabelece conexão com a plataforma"""
@@ -93,16 +98,23 @@ class OrionTrader:
             return pd.DataFrame()
 
     def execute_trading_cycle(self):
-        """Executa um ciclo completo de trading multi-ativos"""
+        """Executa um ciclo completo de trading multi-ativos - ✅ VERSÃO DE ELITE"""
         try:
             # 1. Atualizar saldo
             self.balance = self.connector.get_balance()
+            if self.balance is None or self.balance <= 0:
+                self.logger.error("Balanço inválido ou zerado. Pausando operações.")
+                return
+
+            self.performance_summary = self.performance_tracker.get_summary()
+            # ✅ ATUALIZAR MATRIZ DE CORRELAÇÃO PERIODICAMENTE
+            self.multi_asset_manager.update_correlation_matrix_if_needed()
 
             # 2. Analisar TODOS os ativos
             all_signals = self.multi_asset_manager.analyze_all_assets()
 
             if not all_signals:
-                self.logger.warning("Nenhum sinal gerado para os ativos monitorados")
+                self.logger.debug("Nenhum sinal gerado para os ativos monitorados neste ciclo.")
                 return
 
             # 3. Log do resumo de ativos
@@ -120,7 +132,58 @@ class OrionTrader:
             self._check_open_trades()
 
         except Exception as e:
-            self.logger.error(f"Erro no ciclo de trading: {e}")
+            self.logger.error(f"Erro crítico no ciclo de trading: {e}", exc_info=True)
+
+    def _should_execute_trade(self, signal: Dict) -> bool:
+        """Verifica se deve executar uma trade, incluindo filtro de correlação - ✅ VERSÃO DE ELITE"""
+        asset = signal['asset']
+
+        # Verificações básicas (limites, confiança, etc.)
+        max_trades = self.config['trading'].get('max_open_trades', 3)
+        if len(self.open_trades) >= max_trades:
+            self.logger.debug(f"Limite global de trades atingido ({max_trades})")
+            return False
+
+        asset_state = self.multi_asset_manager.asset_states[asset]
+        max_per_asset = self.config['trading'].get('max_trades_per_asset', 1)
+        if asset_state['open_trades'] >= max_per_asset:
+            self.logger.debug(f"Limite de trades para {asset} atingido ({max_per_asset})")
+            return False
+
+        min_confidence = self.config['trading'].get('min_confidence', 0.5)
+        if signal.get('confidence', 0) < min_confidence:
+            return False
+
+        if signal['regime'].value == 'CHOPPY':
+            return False
+
+        # ✅ FILTRO DE ELITE: GERENCIAMENTO DE RISCO DE CORRELAÇÃO
+        asset_to_trade = signal['asset']
+        direction_to_trade = signal['direction']
+        correlation_threshold = 0.80  # Limite de correlação (configurável)
+
+        # Se a matriz de correlação não estiver vazia
+        if not self.multi_asset_manager.correlation_matrix.empty:
+            for open_trade in self.open_trades:
+                open_asset = open_trade['asset']
+                open_direction = open_trade['signal']['direction']
+
+                # Se a direção do trade a ser aberto for a mesma do trade já aberto
+                if open_direction == direction_to_trade:
+                    try:
+                        # Obter correlação entre o novo ativo e o ativo já em operação
+                        correlation = self.multi_asset_manager.correlation_matrix.loc[asset_to_trade, open_asset]
+                        if abs(correlation) > correlation_threshold:
+                            self.logger.warning(
+                                f"TRADE BLOQUEADA: Risco de correlação. "
+                                f"{asset_to_trade} tem correlação de {correlation:.2f} com {open_asset} (limite: {correlation_threshold})."
+                            )
+                            return False
+                    except KeyError:
+                        # Acontece se um dos ativos não está na matriz, continuar normalmente
+                        pass
+
+        return True
 
     def _log_assets_summary(self, all_signals: Dict):
         """Log do resumo de todos os ativos"""
@@ -140,43 +203,36 @@ class OrionTrader:
 
         self.logger.info("===========================")
 
-    def _should_execute_trade(self, signal: Dict) -> bool:
-        """Verifica se deve executar uma trade"""
-        asset = signal['asset']
-
-        # Verificar limites globais
-        max_trades = self.config['trading'].get('max_open_trades', 3)
-        if len(self.open_trades) >= max_trades:
-            self.logger.debug(f"Limite global de trades atingido ({max_trades})")
-            return False
-
-        # Verificar limites por ativo
-        asset_state = self.multi_asset_manager.asset_states[asset]
-        max_per_asset = self.config['trading'].get('max_trades_per_asset', 1)
-        if asset_state['open_trades'] >= max_per_asset:
-            self.logger.debug(f"Limite de trades para {asset} atingido ({max_per_asset})")
-            return False
-
-        # Verificar confiança mínima
-        min_confidence = self.config['trading'].get('min_confidence', 0.5)
-        if signal.get('confidence', 0) < min_confidence:
-            return False
-
-        # Verificar regime (não operar em CHOPPY)
-        if signal['regime'].value == 'CHOPPY':
-            return False
-
-        return True
-
     def _execute_trade(self, signal: Dict):
-        """Executa uma trade para um ativo específico - VERSÃO CORRIGIDA"""
+        """Executa uma trade, ajustando o risco com base no desempenho da estratégia - ✅ VERSÃO DE ELITE"""
         try:
             asset = signal['asset']
             direction = 'call' if signal['direction'] == 'LONG' else 'put'
+            strategy_used = signal.get('strategy_used', 'UNKNOWN')
 
-            # Calcular tamanho da posição
+            # ✅ LÓGICA DE RISCO ADAPTATIVO
+            performance_mod = 1.0  # Modificador de risco padrão
+            strategy_perf = self.performance_summary.get(strategy_used)
+
+            # Se a estratégia foi usada > 10 vezes e está com P/L negativo, reduzir o risco.
+            if strategy_perf and strategy_perf['count'] > 10 and strategy_perf['pnl_total'] < 0:
+                self.logger.warning(
+                    f"Reduzindo risco para a estratégia '{strategy_used}' devido a desempenho negativo "
+                    f"(P/L: {strategy_perf['pnl_total']:.2f} em {strategy_perf['count']} trades)."
+                )
+                performance_mod = 0.5  # Reduz o risco em 50%
+
+            # Se a estratégia está com ótimo desempenho, bonificar o risco ligeiramente.
+            elif strategy_perf and strategy_perf['count'] > 10 and strategy_perf['pnl_total'] > (
+                    self.config['trading']['risk_per_trade'] * 5):
+                self.logger.info(
+                    f"Aumentando risco para a estratégia '{strategy_used}' devido a alto desempenho."
+                )
+                performance_mod = 1.2  # Aumenta o risco em 20%
+
+            # Calcular tamanho da posição com o modificador
             position_size = self.risk_manager.calculate_position_size(
-                self.balance, signal['confidence']
+                self.balance, signal['confidence'], performance_modifier=performance_mod
             )
 
             # Colocar ordem
@@ -188,7 +244,6 @@ class OrionTrader:
             )
 
             if result:
-                # Registrar trade com informações do ativo
                 trade_info = {
                     'order_id': order_id,
                     'asset': asset,
@@ -197,18 +252,15 @@ class OrionTrader:
                     'signal': signal
                 }
                 self.open_trades.append(trade_info)
-
-                # Atualizar contador do ativo
                 self.multi_asset_manager.update_trade_count(asset, +1)
 
                 self.logger.info(
                     f"🎯 TRADE EXECUTADA - Ativo: {asset}, "
                     f"Direção: {direction}, "
-                    f"Valor: ${position_size:.2f}, "
-                    f"Regime: {signal['regime'].value}, "
-                    f"Confiança: {signal['confidence']:.2f}"
+                    f"Valor: ${position_size:.2f} (Mod: {performance_mod}x), "
+                    f"Estratégia: {strategy_used}, "
+                    f"Conf: {signal['confidence']:.2f}"
                 )
-
             else:
                 self.logger.error(f"Falha ao executar ordem para {asset}: {order_id}")
 
@@ -234,31 +286,25 @@ Confiança: {signal['confidence']:.2f}
         """)
 
     def _check_open_trades(self):
-        """Verifica e atualiza trades abertas - ✅ VERSÃO CORRIGIDA E COMPLETA"""
-
-        # Iterar sobre uma cópia da lista para poder remover itens com segurança
+        """Verifica e atualiza trades abertas, registrando a performance - ✅ VERSÃO DE ELITE"""
         for trade_info in list(self.open_trades):
             order_id = trade_info['order_id']
             asset = trade_info['asset']
 
-            # O primeiro valor do retorno de check_win_v4 é um booleano que indica se a trade terminou
-            is_closed, result = self.connector.check_win(order_id)
+            is_closed, pnl = self.connector.check_win(order_id)
 
-            if is_closed:  # A trade foi finalizada
-
-                # O resultado (result) pode ser > 0 (ganho), < 0 (perda), ou 0 (empate)
-                if result > 0:
+            if is_closed:
+                if pnl > 0:
                     outcome = "GANHOU"
-                    profit = result
-                    self.logger.info(f"✅ Trade {order_id} ({asset}) finalizada: {outcome} | Lucro: ${profit:.2f}")
+                    self.logger.info(f"✅ Trade {order_id} ({asset}) finalizada: {outcome} | Lucro: ${pnl:.2f}")
                 else:
                     outcome = "PERDEU"
-                    self.logger.info(f"❌ Trade {order_id} ({asset}) finalizada: {outcome}")
+                    self.logger.info(f"❌ Trade {order_id} ({asset}) finalizada: {outcome} | Prejuízo: ${pnl:.2f}")
 
-                # Remover a trade da lista de abertas
+                # ✅ REGISTRAR O RESULTADO NO PERFORMANCE TRACKER
+                self.performance_tracker.record_trade(trade_info, pnl)
+
                 self.open_trades.remove(trade_info)
-
-                # Decrementar o contador de trades para o ativo específico
                 self.multi_asset_manager.update_trade_count(asset, -1)
 
     def list_available_assets(self):

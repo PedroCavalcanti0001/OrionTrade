@@ -4,7 +4,7 @@ Gerenciador de Múltiplos Ativos
 
 import pandas as pd
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bot.analysis.regime_classifier import MarketRegime
 
@@ -21,7 +21,13 @@ class MultiAssetManager:
 
         self.trading_config = config.get('trading', {})
         self.assets = self.trading_config.get('assets', ['EURUSD'])
+
         self.max_trades_per_asset = self.trading_config.get('max_trades_per_asset', 1)
+
+        # ✅ ATRIBUTOS PARA CORRELAÇÃO
+        self.correlation_matrix = pd.DataFrame()
+        self.last_correlation_update = None
+        self.correlation_update_interval = timedelta(minutes=60)  # Atualizar a cada hora
 
         # Estado por ativo
         self.asset_states = {}
@@ -38,54 +44,109 @@ class MultiAssetManager:
                 'priority_score': 0.0
             }
 
-    def get_market_data_for_asset(self, asset: str, count: int = 100) -> pd.DataFrame:
-        try:
-            timeframe = self.trading_config.get('timeframe', 60)
+    def update_correlation_matrix_if_needed(self):
+        """Calcula a matriz de correlação se o intervalo de tempo tiver passado."""
+        now = datetime.now()
+        if self.last_correlation_update is None or (
+                now - self.last_correlation_update > self.correlation_update_interval):
+            try:
+                self.logger.info("Atualizando matriz de correlação de ativos...")
+                all_closes = {}
+                timeframe = self.trading_config.get('timeframe', 1) * 60
+                # Usar mais dados para uma correlação mais estável
+                for asset in self.assets:
+                    df = self.get_market_data_for_asset(asset, timeframe, count=200)
+                    if not df.empty:
+                        all_closes[asset] = df['close']
 
+                if not all_closes:
+                    self.logger.warning("Não foi possível obter dados para calcular a correlação.")
+                    return
+
+                price_data = pd.DataFrame(all_closes).ffill().bfill()
+                self.correlation_matrix = price_data.corr()
+                self.last_correlation_update = now
+                self.logger.info("Matriz de correlação atualizada com sucesso.")
+                self.logger.debug(f"Matriz de Correlação:\n{self.correlation_matrix}")
+
+            except Exception as e:
+                self.logger.error(f"Falha ao calcular a matriz de correlação: {e}")
+
+    def analyze_all_assets(self) -> Dict[str, Dict]:
+        """Analisa todos os ativos com contexto Multi-Timeframe - ✅ VERSÃO DE ELITE"""
+        all_signals = {}
+        timeframe_main = self.trading_config.get('timeframe', 1) * 60
+        timeframe_context = timeframe_main * 15  # Ex: 1min -> 15min de contexto
+
+        for asset in self.assets:
+            try:
+                if self.should_skip_asset(asset):
+                    continue
+
+                # Obter dados de ambos os timeframes
+                df_main = self.get_market_data_for_asset(asset, timeframe_main)
+                df_context = self.get_market_data_for_asset(asset, timeframe_context, count=50)
+
+                if df_main is None or df_main.empty:
+                    self.logger.debug(f"Dados principais vazios para {asset}, pulando...")
+                    continue
+
+                # Gerar sinal usando ambos os dataframes
+                signal = self.strategy_selector.get_trading_signal(df_main, df_context)
+
+                if signal is None:
+                    self.logger.debug(f"Sinal None para {asset}, pulando...")
+                    continue
+
+                signal['asset'] = asset
+                priority_score = self.calculate_priority_score(signal, asset)
+                signal['priority_score'] = priority_score
+
+                self.update_asset_state(asset, signal)
+                all_signals[asset] = signal
+
+                self.logger.debug(
+                    f"Análise {asset}: {signal['regime'].value} - Contexto: {signal['analysis'].get('context_trend', 'N/A')} - Pri: {priority_score:.2f}")
+
+            except Exception as e:
+                self.logger.error(f"Erro ao analisar {asset}: {e}")
+                continue
+
+        return all_signals
+
+    def get_market_data_for_asset(self, asset: str, timeframe: int, count: int = 100) -> pd.DataFrame:
+        """Obtém dados de mercado para um ativo e timeframe específicos."""
+        try:
+            # A timeframe agora é passada como argumento
             candles = self.connector.get_candles(asset, timeframe, count)
 
             if not candles:
-                self.logger.debug(f"Nenhum candle obtido para {asset}")
+                self.logger.debug(f"Nenhum candle obtido para {asset} no timeframe {timeframe}")
                 return pd.DataFrame()
-
-            # Converter para DataFrame
+            # ... resto da função permanece igual
             df = pd.DataFrame(candles)
-
-            # VERIFICAÇÃO CRÍTICA: garantir colunas necessárias
             required_columns = ['open', 'high', 'low', 'close', 'volume']
-
-            # Verificar se as colunas existem com nomes alternativos
-            column_mapping = {
-                'min': 'low',
-                'max': 'high'
-            }
+            column_mapping = {'min': 'low', 'max': 'high'}
 
             for old_name, new_name in column_mapping.items():
                 if old_name in df.columns and new_name not in df.columns:
                     df[new_name] = df[old_name]
 
-            # Garantir que todas as colunas necessárias existem
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 self.logger.error(f"Colunas faltando para {asset}: {missing_columns}")
                 return pd.DataFrame()
 
-            # Processar timestamp
             if 'timestamp' not in df.columns and 'from' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['from'], unit='s')
-            elif 'timestamp' not in df.columns:
-                # Criar timestamp sequencial se não existir
-                df['timestamp'] = pd.date_range(
-                    start=datetime.now(),
-                    periods=len(df),
-                    freq=f'{timeframe}min'
-                )
+            elif 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            else:
+                df['timestamp'] = pd.date_range(start=datetime.now(), periods=len(df), freq=f'{timeframe}s')
 
-            # Garantir que os dados são numéricos
             for col in required_columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # Remover NaNs
             df = df.dropna()
 
             if df.empty:
@@ -99,47 +160,6 @@ class MultiAssetManager:
             self.logger.error(f"Erro ao obter dados para {asset}: {e}")
             return pd.DataFrame()
 
-    def analyze_all_assets(self) -> Dict[str, Dict]:
-        """Analisa todos os ativos e retorna sinais - VERSÃO CORRIGIDA"""
-        all_signals = {}
-
-        for asset in self.assets:
-            try:
-                # Obter dados do ativo
-                df = self.get_market_data_for_asset(asset)
-
-                # ✅ VERIFICAÇÃO ROBUSTA
-                if df is None or df.empty:
-                    self.logger.debug(f"Dados vazios para {asset}, pulando...")
-                    continue
-
-                # Gerar sinal
-                signal = self.strategy_selector.get_trading_signal(df)
-
-                # ✅ VERIFICAÇÃO DO SINAL
-                if signal is None:
-                    self.logger.debug(f"Sinal None para {asset}, pulando...")
-                    continue
-
-                signal['asset'] = asset
-
-                # Calcular prioridade
-                priority_score = self.calculate_priority_score(signal, asset)
-                signal['priority_score'] = priority_score
-
-                # Atualizar estado do ativo
-                self.update_asset_state(asset, signal)
-
-                all_signals[asset] = signal
-
-                # ✅ CORREÇÃO: Usar logger.debug diretamente (sem isEnabledFor)
-                self.logger.debug(f"Análise {asset}: {signal['regime'].value} - Prioridade: {priority_score:.2f}")
-
-            except Exception as e:
-                self.logger.error(f"Erro ao analisar {asset}: {e}")
-                continue
-
-        return all_signals
 
     def calculate_priority_score(self, signal: Dict, asset: str) -> float:
         """Calcula pontuação de prioridade para o ativo - VERSÃO CORRIGIDA"""

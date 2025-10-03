@@ -1,6 +1,6 @@
 {
   "trading": {
-    "assets": ["EURUSD-op", "GBPUSD-op", "USDJPY-op"],
+    "assets": ["EURUSD-op", "GBPUSD-op", "USDJPY-op", "AUDUSD-op", "USDCAD-op", "EURGBP-op", "EURJPY-op", "GBPJPY-op", "AUDJPY-op", "EURCHF-op", "EURAUD-op", "EURCAD-op", "AUDCAD-op", "CADCHF-op"],
     "timeframe": 1,
     "initial_balance": 1000.0,
     "risk_per_trade": 2.0,

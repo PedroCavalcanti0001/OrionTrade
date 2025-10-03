@@ -5,16 +5,15 @@ Seletor de Estratégias Baseado no Regime
 import pandas as pd
 from typing import Dict, Optional, Tuple
 from .regime_classifier import MarketRegime, MarketRegimeClassifier
-from ..utils.logger import setup_logger
 
 
 class StrategySelector:
     """Seleciona e executa estratégias baseadas no regime de mercado"""
 
-    def __init__(self, config: Dict):
-        self.logger = setup_logger()
+    def __init__(self, config: Dict, logger):
+        self.logger = logger
         self.config = config
-        self.regime_classifier = MarketRegimeClassifier(config)
+        self.regime_classifier = MarketRegimeClassifier(config, self.logger)
         self.analysis_config = config.get('analysis', {})
 
     def debug_confidence_calculation(self, df_with_features: pd.DataFrame, signal: Dict):
@@ -48,64 +47,58 @@ class StrategySelector:
             # Silenciosamente ignora erros no debug
             pass
 
-    def get_trading_signal(self, df: pd.DataFrame) -> Dict:
-        """Gera sinal de trading - VERSÃO MAIS ROBUSTA"""
-
-        # ✅ VERIFICAÇÃO INICIAL ROBUSTA
-        if df is None or df.empty:
-            self.logger.warning("DataFrame vazio recebido para sinal")
+    def get_trading_signal(self, df_main: pd.DataFrame, df_context: pd.DataFrame = None) -> Dict:
+        """Gera sinal de trading com base em múltiplos timeframes - ✅ VERSÃO DE ELITE"""
+        if df_main is None or df_main.empty:
+            self.logger.warning("DataFrame principal vazio recebido para sinal")
             return self._get_empty_signal()
 
         try:
-            # Calcular features UMA VEZ e reutilizar
-            df_with_features = self.regime_classifier.calculate_features(df)
+            # Calcular features UMA VEZ para cada timeframe
+            df_main_features = self.regime_classifier.calculate_features(df_main)
 
-            # ✅ VERIFICAÇÃO APÓS cálculo
-            if df_with_features is None or df_with_features.empty:
-                self.logger.warning("DataFrame com features vazio")
+            # Obter a tendência principal do timeframe de contexto, se disponível
+            context_trend = 'Indefinida'
+            if df_context is not None and not df_context.empty:
+                df_context_features = self.regime_classifier.calculate_features(df_context)
+                context_analysis = self.regime_classifier.get_detailed_analysis(df_context_features)
+                context_trend = context_analysis.get('trend_direction', 'Indefinida')
+                self.logger.debug(f"Contexto (MTA) definido: Tendência de {context_trend}")
+
+            if df_main_features is None or df_main_features.empty:
+                self.logger.warning("DataFrame principal com features vazio")
                 return self._get_empty_signal()
 
-            analysis = self.regime_classifier.get_detailed_analysis(df_with_features)
-
-            # ✅ VERIFICAÇÃO DA ANÁLISE
+            analysis = self.regime_classifier.get_detailed_analysis(df_main_features)
             if analysis is None:
                 self.logger.warning("Análise retornou None")
                 return self._get_empty_signal()
 
             regime = analysis['regime']
-
-            signal = {
-                'action': 'WAIT',
-                'direction': None,
-                'confidence': 0.0,
+            signal = self._get_empty_signal()
+            signal.update({
                 'regime': regime,
-                'analysis': analysis,
-                'strategy_used': None
-            }
+                'analysis': analysis
+            })
 
-            # DEBUG com dados CORRETOS
-            self.debug_confidence_calculation(df_with_features, signal)
-
-            # Não operar em mercados perigosos
             if regime == MarketRegime.CHOPPY:
-                signal['action'] = 'WAIT'
                 signal['strategy_used'] = 'SAFETY_FILTER'
                 return signal
 
-            # Aplicar estratégia baseada no regime
+            # Aplicar estratégia baseada no regime, passando o contexto
             if regime == MarketRegime.UPTREND:
-                return self._trend_following_strategy(df_with_features, 'LONG', analysis)
+                return self._trend_following_strategy(df_main_features, 'LONG', analysis, context_trend)
             elif regime == MarketRegime.DOWNTREND:
-                return self._trend_following_strategy(df_with_features, 'SHORT', analysis)
+                return self._trend_following_strategy(df_main_features, 'SHORT', analysis, context_trend)
             elif regime == MarketRegime.RANGING:
-                return self._mean_reversion_strategy(df_with_features, analysis)
+                return self._mean_reversion_strategy(df_main_features, analysis, context_trend)
             elif regime == MarketRegime.SQUEEZE:
-                return self._breakout_watch_strategy(df_with_features, analysis)
+                return self._breakout_watch_strategy(df_main_features, analysis)
 
             return signal
 
         except Exception as e:
-            self.logger.error(f"Erro em get_trading_signal: {e}")
+            self.logger.error(f"Erro crítico em get_trading_signal: {e}")
             return self._get_empty_signal()
 
     def _get_empty_signal(self) -> Dict:
@@ -119,69 +112,57 @@ class StrategySelector:
             'strategy_used': 'NO_DATA'
         }
 
-    def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict) -> Dict:
-        """Estratégia de seguir tendência - CONFIANÇA CORRIGIDA"""
+    def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict,
+                                  context_trend: str) -> Dict:
+        """Estratégia de seguir tendência com filtro MTA e entrada em pullback - ✅ VERSÃO DE ELITE"""
+        signal = self._get_wait_signal(analysis, 'TREND_FOLLOWING')
+        signal['direction'] = trend_direction
 
-        current = df.iloc[-1]
+        # ✅ FILTRO DE ELITE 1: Análise Multi-Timeframe (MTA)
+        # A operação deve estar a favor da tendência do timeframe maior.
+        is_aligned_with_context = (trend_direction == 'LONG' and context_trend == 'Alta') or \
+                                  (trend_direction == 'SHORT' and context_trend == 'Baixa') or \
+                                  context_trend == 'Indefinida'  # Permite se o contexto não for claro
 
-        signal = {
-            'action': 'WAIT',
-            'direction': trend_direction,
-            'confidence': 0.3,
-            'regime': analysis['regime'],
-            'analysis': analysis,
-            'strategy_used': 'TREND_FOLLOWING'
-        }
-
-        # Verificar condições básicas - CORREÇÃO DA SINTAXE
-        basic_conditions = [
-            current.get('adx', 0) > 15,
-            30 <= current.get('rsi', 50) <= 70,  # CORREÇÃO AQUI - usando operadores de comparação
-            analysis['trend_direction'].lower() == trend_direction.lower()
-        ]
-
-        if not all(basic_conditions):
+        if not is_aligned_with_context:
+            self.logger.debug(f"Trade {trend_direction} bloqueada. Sinal M1 contra tendência M15 ({context_trend}).")
             return signal
 
-        # Calcular confiança baseada em múltiplos fatores
-        confidence_factors = []
-
-        # Força da tendência (ADX)
-        adx_score = min(current.get('adx', 0) / 40.0, 1.0)
-        confidence_factors.append(adx_score * 0.3)
-
-        # Alinhamento de EMAs
-        if trend_direction == 'LONG':
-            ema_score = 1.0 if current.get('ema_fast', 0) > current.get('ema_slow', 0) else 0.3
-        else:
-            ema_score = 1.0 if current.get('ema_fast', 0) < current.get('ema_slow', 0) else 0.3
-        confidence_factors.append(ema_score * 0.3)
-
-        # RSI favorável
+        current = df.iloc[-1]
         rsi = current.get('rsi', 50)
-        if trend_direction == 'LONG':
-            rsi_score = 1.0 if rsi < 60 else 0.7 if rsi < 70 else 0.3
-        else:
-            rsi_score = 1.0 if rsi > 40 else 0.7 if rsi > 30 else 0.3
-        confidence_factors.append(rsi_score * 0.2)
+        adx = current.get('adx', 0)
 
-        # Posição nas Bandas de Bollinger
-        bb_position = analysis.get('bb_position', 'Central')
-        if (trend_direction == 'LONG' and bb_position == 'Inferior') or \
-                (trend_direction == 'SHORT' and bb_position == 'Superior'):
-            bb_score = 1.0
-        else:
-            bb_score = 0.5
-        confidence_factors.append(bb_score * 0.2)
+        # ✅ FILTRO DE ELITE 2: Entrada em Pullback
+        # Não entramos no pico do movimento, mas sim na retração.
+        is_pullback = (trend_direction == 'LONG' and 40 <= rsi <= 55) or \
+                      (trend_direction == 'SHORT' and 45 <= rsi <= 60)
 
-        # Confiança final
-        final_confidence = sum(confidence_factors)
+        if not is_pullback or adx < 20:  # Exige ADX mínimo para confirmar que ainda é uma tendência
+            self.logger.debug(f"Aguardando pullback para {trend_direction}. RSI atual: {rsi:.2f}")
+            return signal
 
-        # Aplicar confiança mínima baseada no regime
-        if final_confidence >= 0.5:
+        # Se todas as condições de elite forem atendidas, calculamos a confiança.
+        adx_score = min(adx / 50.0, 1.0)
+        rsi_score = 1.0 - (abs(50 - rsi) / 50.0)  # Mais perto de 50, maior o score no pullback
+
+        # Bônus se o pullback quase tocou a EMA lenta, um ponto de suporte/resistência dinâmico
+        ema_slow = current.get('ema_slow', 0)
+        pullback_bonus = 0
+        if trend_direction == 'LONG' and current['low'] <= ema_slow:
+            pullback_bonus = 0.2
+        elif trend_direction == 'SHORT' and current['high'] >= ema_slow:
+            pullback_bonus = 0.2
+
+        final_confidence = (adx_score * 0.4) + (rsi_score * 0.4) + (pullback_bonus * 0.2)
+
+        # Confiança adicional pela MTA
+        if is_aligned_with_context:
+            final_confidence = min(final_confidence * 1.2, 0.95)
+
+        if final_confidence >= self.config['trading'].get('min_confidence', 0.5):
             signal.update({
                 'action': 'ENTER',
-                'confidence': min(final_confidence, 0.95)
+                'confidence': final_confidence
             })
 
         return signal
@@ -197,34 +178,43 @@ class StrategySelector:
             'strategy_used': strategy
         }
 
-    def _mean_reversion_strategy(self, df: pd.DataFrame, analysis: Dict) -> Dict:
-        """Estratégia de reversão à média em mercado lateral"""
+    def _mean_reversion_strategy(self, df: pd.DataFrame, analysis: Dict, context_trend: str) -> Dict:
+        """Estratégia de reversão à média com vela de confirmação e filtro MTA - ✅ VERSÃO DE ELITE"""
+        signal = self._get_wait_signal(analysis, 'MEAN_REVERSION')
+
+        # ✅ FILTRO DE ELITE: Evitar reversão contra uma tendência de contexto forte.
+        if (context_trend == 'Alta' and analysis['rsi'] > 50) or \
+                (context_trend == 'Baixa' and analysis['rsi'] < 50):
+            self.logger.debug(f"Reversão bloqueada pela forte tendência de contexto ({context_trend}).")
+            return signal
 
         current = df.iloc[-1]
-        prev = df.iloc[-2]
 
-        signal = {
-            'action': 'WAIT',
-            'direction': None,
-            'confidence': 0.0,
-            'regime': analysis['regime'],
-            'analysis': analysis,
-            'strategy_used': 'MEAN_REVERSION'
-        }
+        # CONDIÇÃO DE SHORT: Sobrecompra + Vela de Confirmação Baixista
+        is_overbought = current['close'] >= current['bb_upper'] * 0.995 or current['rsi'] > 72
+        is_bearish_confirmation = current['close'] < current['open']
 
-        # Toque na banda superior + RSI sobrecomprado -> SHORT
-        if (current['close'] >= current['bb_upper'] * 0.995 or
-                current['rsi'] > 70):
-            signal['action'] = 'ENTER'
-            signal['direction'] = 'SHORT'
-            signal['confidence'] = 0.7
+        if is_overbought and is_bearish_confirmation:
+            confidence = 0.75 + (min(current['rsi'] - 70, 20) / 100)  # Confiança aumenta com RSI mais extremo
+            signal.update({
+                'action': 'ENTER',
+                'direction': 'SHORT',
+                'confidence': min(confidence, 0.95)
+            })
+            return signal
 
-        # Toque na banda inferior + RSI sobrevendido -> LONG
-        elif (current['close'] <= current['bb_lower'] * 1.005 or
-              current['rsi'] < 30):
-            signal['action'] = 'ENTER'
-            signal['direction'] = 'LONG'
-            signal['confidence'] = 0.7
+        # CONDIÇÃO DE LONG: Sobrevenda + Vela de Confirmação Altista
+        is_oversold = current['close'] <= current['bb_lower'] * 1.005 or current['rsi'] < 28
+        is_bullish_confirmation = current['close'] > current['open']
+
+        if is_oversold and is_bullish_confirmation:
+            confidence = 0.75 + (min(30 - current['rsi'], 20) / 100)
+            signal.update({
+                'action': 'ENTER',
+                'direction': 'LONG',
+                'confidence': min(confidence, 0.95)
+            })
+            return signal
 
         return signal
 

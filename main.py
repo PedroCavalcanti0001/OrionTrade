@@ -16,10 +16,6 @@ from dotenv import load_dotenv
 # CARREGAR .env
 load_dotenv()
 
-# VARIÁVEL GLOBAL para nível de logging
-log_level = "DEBUG"  # Valor padrão
-
-
 # SILENCIAR ERROS DE DIGITAL OPTIONS
 def silence_digital_errors():
     """Silencia os erros específicos de digital options"""
@@ -72,23 +68,7 @@ def load_config(config_path="config.json"):
         print(f"Erro: Arquivo de configuração {config_path} contém JSON inválido.")
         sys.exit(1)
 
-
-def get_log_level():
-    """Retorna o nível de logging global"""
-    global log_level
-    return log_level
-
-
-def set_log_level(level):
-    """Define o nível de logging global"""
-    global log_level
-    log_level = level
-    print(f"Log level definido globalmente para: {log_level}")
-
-
 def main():
-    """Função principal"""
-    global log_level  # Declarar como global para modificar a variável externa
 
     parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo Multi-Ativos')
     parser.add_argument('--mode', type=str, required=True,
@@ -96,18 +76,7 @@ def main():
                         help='Modo de operação: demo, live ou backtest')
     parser.add_argument('--config', type=str, default='config.json',
                         help='Caminho para o arquivo de configuração')
-    parser.add_argument(
-        '--log-level',
-        type=str,
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        default='INFO',
-        help='Nível de logging: DEBUG, INFO, WARNING, ERROR, CRITICAL (padrão: INFO)'
-    )
     args = parser.parse_args()
-
-    # DEFINIR VARIÁVEL GLOBAL
-    log_level = args.log_level
-    print(f"Variável global log_level definida para: {log_level}")
 
     # Carregar configurações
     config = load_config(args.config)
@@ -168,15 +137,12 @@ def main():
         print("Deve ter: bot/trader/orion_trader.py OU trader/orion_trader.py")
         sys.exit(1)
 
-    # Configurar logger usando a variável global
-    logger = setup_logger(log_level=log_level)
+    logger = setup_logger(config)
 
     try:
         # Inicializar e executar o trader
-        trader = OrionTrader(config, args.mode, logger)
+        trader = OrionTrader(config, args.mode, logger=logger)
 
-        # Verificar se a variável global está acessível
-        print(f"Log level global antes de executar: {log_level}")
 
         trader.run()
 

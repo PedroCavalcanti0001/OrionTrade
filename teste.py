@@ -43,7 +43,7 @@ def run_bot():
         print(f"💰 Saldo da conta de treinamento: ${saldo:,.2f}")
 
         # --- 5. Obter Dados de um Ativo ---
-        ativo = "GBPUSD-OTC"
+        ativo = "EURUSD-op"
         print(f"📈 Obtendo dados para o ativo: {ativo}...")
 
         # Obtém as últimas velas para verificar o preço
@@ -54,7 +54,7 @@ def run_bot():
         else:
             print(f"Não foi possível obter dados para {ativo}. Talvez o mercado esteja fechado.")
             # Para testes fora do horário de mercado, use ativos OTC. Ex: "EURUSD-OTC"
-            ativo = "GBPUSD-OTC"
+            ativo = "EURUSD-op"
             print(f"Tentando com o ativo {ativo}...")
 
         # --- 6. Realizar uma Operação de Teste ---
@@ -73,7 +73,7 @@ def run_bot():
             resultado = api.check_win_v4(order_id)
             print(f"🤑 Resultado da operação: Lucro de ${resultado[1]:,.2f}")
         else:
-            print("❌ Falha ao enviar a operação de teste.")
+            print("❌ Falha ao enviar a operação de teste. ", order_id)
 
     except Exception as e:
         print(f"Ocorreu um erro durante a execução: {e}")
@@ -81,7 +81,6 @@ def run_bot():
     finally:
         # --- 7. Desconectar ---
         print("--- Desconectando da API ---")
-        api.disconnect()
 
 
 if __name__ == "__main__":

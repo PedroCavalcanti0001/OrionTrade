@@ -8,14 +8,12 @@ from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 
-from bot.utils.logger import setup_logger
-
 
 class MockConnector:
     """Conector mock que simula dados de mercado"""
 
-    def __init__(self, initial_balance: float = 1000.0):
-        self.logger = setup_logger()
+    def __init__(self, initial_balance: float = 1000.0, logger=None):
+        self.logger = logger
         self.initial_balance = initial_balance
         self.balance = initial_balance
         self.connected = False

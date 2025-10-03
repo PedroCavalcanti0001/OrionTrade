@@ -11,26 +11,32 @@ from bot.analysis.regime_classifier import MarketRegimeClassifier
 class RiskManager:
     """Gerencia risco, posição, stop loss e take profit"""
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, logger):
+        self.logger = logger
         self.config = config
         self.trading_config = config.get('trading', {})
-        self.regime_classifier = MarketRegimeClassifier(config)
+        self.regime_classifier = MarketRegimeClassifier(config, self.logger)
 
-    def calculate_position_size(self, balance: float, signal_confidence: float) -> float:
-        """Calcula tamanho da posição baseado no risco e confiança"""
-
+    def calculate_position_size(self, balance: float, signal_confidence: float,
+                                performance_modifier: float = 1.0) -> float:
+        """Calcula tamanho da posição com base no risco, confiança e modificador de desempenho - ✅ VERSÃO DE ELITE"""
         risk_per_trade = self.trading_config.get('risk_per_trade', 1.0)
         base_risk_amount = balance * (risk_per_trade / 100)
 
         # Ajustar risco baseado na confiança do sinal
-        adjusted_risk = base_risk_amount * signal_confidence
+        # Sinais de alta confiança arriscam mais, até o limite base
+        confidence_factor = 0.5 + (signal_confidence / 2)  # Mapeia confiança [0,1] para [0.5, 1]
+        adjusted_risk = base_risk_amount * confidence_factor
 
-        # Limitar posição máxima (não mais que 5% do balanço)
+        # ✅ APLICAR MODIFICADOR DE PERFORMANCE DINÂMICO
+        final_risk_amount = adjusted_risk * performance_modifier
+
+        # Limitar posição máxima (não mais que 5% do balanço, por segurança)
         max_position = balance * 0.05
-        position_size = min(adjusted_risk, max_position)
+        position_size = min(final_risk_amount, max_position)
 
         # Garantir tamanho mínimo
-        min_position = 1.0  # $1 mínimo
+        min_position = 1.0
         position_size = max(position_size, min_position)
 
         return round(position_size, 2)

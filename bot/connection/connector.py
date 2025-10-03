@@ -4,17 +4,14 @@ Módulo de conexão com a IQ Option
 
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from iqoptionapi.stable_api import IQ_Option
-
-from bot.utils.logger import setup_logger
-
 
 class IQConnector:
     """Conector para API real da IQ Option"""
 
-    def __init__(self, email: str, password: str, account_type: str = "PRACTICE"):
-        self.logger = setup_logger()
+    def __init__(self, email: str, password: str, account_type: str = "PRACTICE", logger=None):
+        self.logger = logger
         self.email = email
         self.password = password
         self.account_type = account_type
@@ -110,16 +107,25 @@ class IQConnector:
             self.logger.error(f"Erro ao colocar ordem: {e}")
             return None
 
-    def check_win(self, order_id: int) -> Optional[bool]:
-        """Verifica resultado de uma ordem"""
+    def check_win(self, order_id: int) -> Tuple[bool, float]:
+        """Verifica resultado de uma ordem - VERSÃO CORRIGIDA"""
         if not self.connected:
-            return None
+            return False, 0.0
 
         try:
-            return self.api.check_win_v3(order_id)
+            # Usar check_win_v4 que retorna (resultado_str, pnl)
+            status, pnl = self.api.check_win_v4(order_id)
+
+            # Se status for None, a trade ainda está aberta
+            if status is None:
+                return False, 0.0
+
+            # Se houver um status ('win', 'loose', 'equal'), a trade está fechada
+            return True, pnl
+
         except Exception as e:
-            self.logger.error(f"Erro ao verificar resultado: {e}")
-            return None
+            self.logger.error(f"Erro ao verificar resultado da ordem {order_id}: {e}")
+            return False, 0.0
 
     def disconnect(self):
         """Desconecta da API"""
