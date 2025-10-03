@@ -6,6 +6,8 @@ import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime
 
+from bot.analysis.regime_classifier import MarketRegime
+
 
 class MultiAssetManager:
     """Gerencia análise e trading em múltiplos ativos simultaneamente"""
@@ -45,16 +47,6 @@ class MultiAssetManager:
             if not candles:
                 self.logger.debug(f"Nenhum candle obtido para {asset}")
                 return pd.DataFrame()
-
-            # ✅ CORREÇÃO: Gerar volume artificial se volume for 0
-            for candle in candles:
-                if 'volume' not in candle or candle.get('volume', 0) == 0:
-                    # Gerar volume baseado na volatilidade do candle
-                    price_range = candle.get('max', candle.get('high', 1.0)) - candle.get('min', candle.get('low', 1.0))
-                    base_volume = 1000  # Volume base
-                    volatility_multiplier = max(1.0, price_range * 10000)  # Multiplicador baseado na volatilidade
-                    candle['volume'] = int(base_volume * volatility_multiplier)
-                    self.logger.debug(f"Volume artificial gerado para {asset}: {candle['volume']}")
 
             # Converter para DataFrame
             df = pd.DataFrame(candles)
@@ -176,11 +168,22 @@ class MultiAssetManager:
             score *= 0.1  # Reduz drasticamente se já tem trades abertas
 
         # Baseado no RSI (evitar extremos)
+
+        # ✅ CORREÇÃO: Lógica do RSI agora é sensível ao contexto do regime de mercado
         rsi = signal.get('analysis', {}).get('rsi', 50)
-        if 30 <= rsi <= 70:  # Zona neutra
-            score *= 1.1
-        else:  # Extremos
-            score *= 0.8
+        regime = signal.get('regime')
+
+        # Em tendência, um RSI não extremo é preferível para evitar reversões
+        if regime in [MarketRegime.UPTREND, MarketRegime.DOWNTREND]:
+            if 40 <= rsi <= 60:
+                score *= 1.1  # Bonifica RSI neutro na tendência
+            elif rsi > 70 or rsi < 30:
+                score *= 0.8  # Penaliza levemente RSI extremo
+
+        # Em mercado lateral, um RSI extremo é um sinal de entrada, então é bonificado
+        elif regime == MarketRegime.RANGING:
+            if rsi > 70 or rsi < 30:
+                score *= 1.2  # Bonifica RSI extremo para reversão
 
         # Baseado na volatilidade (ATR)
         atr_percent = signal.get('analysis', {}).get('atr_percent', 0)
@@ -212,11 +215,12 @@ class MultiAssetManager:
             return []
 
         # Filtrar sinais válidos para entrada
+        min_confidence = self.trading_config.get('min_confidence', 0.5)
         valid_signals = []
         for asset, signal in all_signals.items():
             if (signal['action'] == 'ENTER' and
                     self.asset_states[asset]['open_trades'] < self.max_trades_per_asset and
-                    signal.get('confidence', 0) >= 0.6):
+                    signal.get('confidence', 0) >= min_confidence):
                 valid_signals.append(signal)
 
         # Ordenar por prioridade

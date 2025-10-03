@@ -97,7 +97,7 @@ class MockConnector:
 
     def place_order(self, asset: str, direction: str, amount: float,
                     expiration: int = 1) -> Optional[int]:
-        """Simula colocação de ordem"""
+        """Simula colocação de ordem registrando o candle de entrada - ✅ CORREÇÃO"""
         if not self.connected:
             return None
 
@@ -108,43 +108,72 @@ class MockConnector:
         self.order_counter += 1
         order_id = self.order_counter
 
-        # Simular resultado baseado em probabilidade
-        win_probability = 0.6  # 60% de chance de ganhar na simulação
-        is_win = random.random() < win_probability
-
+        # Armazena o índice do candle em que a ordem foi aberta
         self.open_orders[order_id] = {
             'asset': asset,
             'direction': direction,
             'amount': amount,
-            'is_win': is_win,
-            'timestamp': time.time()
+            'entry_index': self.current_index,
+            'entry_price': self.historical_data[self.current_index]['close'],
+            'expiration_candles': expiration  # Expiração em número de candles
         }
 
-        self.balance -= amount
-
-        self.logger.info(f"Ordem mock {order_id} colocada: {direction} ${amount}")
+        # Não deduzir o saldo ainda, apenas no resultado
+        self.logger.info(f"Ordem mock {order_id} colocada: {direction} ${amount} no candle {self.current_index}")
         return order_id
 
-    def check_win(self, order_id: int) -> Optional[bool]:
-        """Simula verificação de resultado"""
+    def check_win(self, order_id: int) -> tuple:
+        """Simula verificação de resultado baseado nos dados históricos - ✅ CORREÇÃO"""
         if order_id not in self.open_orders:
-            return None
+            return False, 0  # Trade não encontrada
 
         order = self.open_orders[order_id]
-        is_win = order['is_win']
 
-        # Simular payout
-        payout_multiplier = 0.8  # 80% de payout na simulação
+        entry_index = order['entry_index']
+        expiration_candles = order['expiration_candles']
 
-        if is_win:
-            win_amount = order['amount'] * (1 + payout_multiplier)
-            self.balance += win_amount
-            self.logger.info(f"Ordem mock {order_id}: GANHOU +${win_amount - order['amount']:.2f}")
-        else:
-            self.logger.info(f"Ordem mock {order_id}: PERDEU -${order['amount']:.2f}")
+        # O candle de resultado é o candle seguinte à expiração
+        result_index = entry_index + expiration_candles
 
+        # Se o candle de resultado ainda não "aconteceu" na simulação, a trade não fechou
+        if result_index >= self.current_index:
+            return False, 0  # Trade ainda está aberta
+
+        # Se o candle de resultado existe nos dados históricos
+        if result_index < len(self.historical_data):
+            entry_price = order['entry_price']
+            result_price = self.historical_data[result_index]['close']
+
+            payout_multiplier = 0.8  # 80% de payout
+            is_win = False
+
+            if order['direction'] == 'call' and result_price > entry_price:
+                is_win = True
+            elif order['direction'] == 'put' and result_price < entry_price:
+                is_win = True
+
+            # Atualizar saldo
+            if is_win:
+                profit = order['amount'] * payout_multiplier
+                self.balance += profit
+                del self.open_orders[order_id]
+                return True, profit
+            else:
+                loss = -order['amount']
+                self.balance += loss
+                del self.open_orders[order_id]
+                return True, loss
+
+        # Se não há dados suficientes, considera como perda
         del self.open_orders[order_id]
-        return is_win
+        return True, -order['amount']  # Trade fechada (sem dados), resultado negativo
+
+    def tick(self):
+        """Avança a simulação em um passo (1 candle)."""
+        if self.current_index < len(self.historical_data) - 1:
+            self.current_index += 1
+            return True
+        return False # Fim dos dados históricos
 
     def disconnect(self):
         """Simula desconexão"""

@@ -117,7 +117,7 @@ class OrionTrader:
                     self._execute_trade(signal)
 
             # 6. Verificar trades abertas
-            # self._check_open_trades()
+            self._check_open_trades()
 
         except Exception as e:
             self.logger.error(f"Erro no ciclo de trading: {e}")
@@ -158,7 +158,8 @@ class OrionTrader:
             return False
 
         # Verificar confiança mínima
-        if signal.get('confidence', 0) < 0.6:
+        min_confidence = self.config['trading'].get('min_confidence', 0.5)
+        if signal.get('confidence', 0) < min_confidence:
             return False
 
         # Verificar regime (não operar em CHOPPY)
@@ -233,20 +234,32 @@ Confiança: {signal['confidence']:.2f}
         """)
 
     def _check_open_trades(self):
-        """Verifica e atualiza trades abertas"""
-        completed_trades = []
+        """Verifica e atualiza trades abertas - ✅ VERSÃO CORRIGIDA E COMPLETA"""
 
-        for order_id in self.open_trades:
-            result = self.connector.check_win(order_id)
+        # Iterar sobre uma cópia da lista para poder remover itens com segurança
+        for trade_info in list(self.open_trades):
+            order_id = trade_info['order_id']
+            asset = trade_info['asset']
 
-            if result is not None:  # Trade finalizada
-                completed_trades.append(order_id)
-                outcome = "GANHOU" if result else "PERDEU"
-                self.logger.info(f"Trade {order_id} finalizada: {outcome}")
+            # O primeiro valor do retorno de check_win_v4 é um booleano que indica se a trade terminou
+            is_closed, result = self.connector.check_win(order_id)
 
-        # Remover trades finalizadas da lista
-        for order_id in completed_trades:
-            self.open_trades.remove(order_id)
+            if is_closed:  # A trade foi finalizada
+
+                # O resultado (result) pode ser > 0 (ganho), < 0 (perda), ou 0 (empate)
+                if result > 0:
+                    outcome = "GANHOU"
+                    profit = result
+                    self.logger.info(f"✅ Trade {order_id} ({asset}) finalizada: {outcome} | Lucro: ${profit:.2f}")
+                else:
+                    outcome = "PERDEU"
+                    self.logger.info(f"❌ Trade {order_id} ({asset}) finalizada: {outcome}")
+
+                # Remover a trade da lista de abertas
+                self.open_trades.remove(trade_info)
+
+                # Decrementar o contador de trades para o ativo específico
+                self.multi_asset_manager.update_trade_count(asset, -1)
 
     def list_available_assets(self):
         """Lista todos os ativos disponíveis na plataforma - VERSÃO CORRIGIDA"""
@@ -296,40 +309,48 @@ Confiança: {signal['confidence']:.2f}
             self.logger.info(f"ATIVOS CONFIGURADOS: {configured_assets}")
 
     def run(self):
-        """Loop principal de execução"""
+        """Loop principal de execução - ✅ CORREÇÃO PARA BACKTEST"""
         if not self.connect():
             self.logger.error("Falha na conexão, encerrando...")
             return
 
         self.running = True
         self.logger.info("Iniciando loop principal de trading...")
-
-        # LISTAR ATIVOS DISPONÍVEIS
         self.list_available_assets()
-
-        # LOG INICIAL DO STATUS DO MERCADO
         self.log_market_status()
 
-        check_interval = self.config.get('execution', {}).get('check_interval', 10)
+        # LÓGICA DE EXECUÇÃO DIFERENTE PARA BACKTEST
+        if self.mode == 'backtest':
+            self.logger.info("Iniciando simulação de backtest...")
+            initial_balance = self.connector.initial_balance
 
-        try:
-            while self.running:
-                start_time = time.time()
-
+            # Loop de backtest que avança candle a candle
+            while self.connector.tick():
                 self.execute_trading_cycle()
 
-                # Calcular tempo de espera para próximo ciclo
-                elapsed = time.time() - start_time
-                sleep_time = max(1, check_interval - elapsed)
+            final_balance = self.connector.get_balance()
+            self.logger.info("===== BACKTEST FINALIZADO =====")
+            self.logger.info(f"Balanço Inicial: ${initial_balance:.2f}")
+            self.logger.info(f"Balanço Final:   ${final_balance:.2f}")
+            profit = final_balance - initial_balance
+            profit_percent = (profit / initial_balance) * 100
+            self.logger.info(f"Lucro/Prejuízo:  ${profit:.2f} ({profit_percent:.2f}%)")
+            self.logger.info("=============================")
 
-                time.sleep(sleep_time)
-
-        except KeyboardInterrupt:
-            self.logger.info("Interrompido pelo usuário")
-        except Exception as e:
-            self.logger.error(f"Erro no loop principal: {e}")
-        finally:
-            self.shutdown()
+        # LÓGICA PARA TRADING REAL OU DEMO
+        else:
+            check_interval = self.config.get('execution', {}).get('check_interval', 10)
+            try:
+                while self.running:
+                    start_time = time.time()
+                    self.execute_trading_cycle()
+                    elapsed = time.time() - start_time
+                    sleep_time = max(1, check_interval - elapsed)
+                    time.sleep(sleep_time)
+            except KeyboardInterrupt:
+                self.logger.info("Interrompido pelo usuário")
+            finally:
+                self.shutdown()
 
     def log_market_status(self):
         """Log do status dos ativos - SEM VALIDAÇÃO DE MERCADO"""
