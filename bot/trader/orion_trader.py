@@ -107,6 +107,9 @@ class OrionTrader:
                 return
 
             self.performance_summary = self.performance_tracker.get_summary()
+            # ✅ ATUALIZAR O SELECTOR DE ESTRATÉGIAS COM O DESEMPENHO
+            self.strategy_selector.update_strategy_performance(self.performance_summary)
+
             # ✅ ATUALIZAR MATRIZ DE CORRELAÇÃO PERIODICAMENTE
             self.multi_asset_manager.update_correlation_matrix_if_needed()
 
@@ -137,6 +140,12 @@ class OrionTrader:
     def _should_execute_trade(self, signal: Dict) -> bool:
         """Verifica se deve executar uma trade, incluindo filtro de correlação - ✅ VERSÃO DE ELITE"""
         asset = signal['asset']
+        strategy_used = signal.get('strategy_used', 'UNKNOWN')
+
+        # Se a estratégia está em cooldown, não deve executar a trade
+        if strategy_used.endswith('_COOLDOWN'):
+            self.logger.debug(f"Não executando trade para {asset} pois a estratégia {strategy_used} está em cooldown.")
+            return False
 
         # Verificações básicas (limites, confiança, etc.)
         max_trades = self.config['trading'].get('max_open_trades', 3)
@@ -210,6 +219,14 @@ class OrionTrader:
             direction = 'call' if signal['direction'] == 'LONG' else 'put'
             strategy_used = signal.get('strategy_used', 'UNKNOWN')
 
+            # Limpar o nome do ativo (remover -op se presente)
+            clean_asset = asset.replace('-op', '')
+
+            # Verificar se o mercado está aberto para o ativo
+            if not self.connector.market_validator.is_market_open(clean_asset):
+                self.logger.warning(f"Mercado para {clean_asset} está fechado. Não é possível executar a ordem.")
+                return
+
             # ✅ LÓGICA DE RISCO ADAPTATIVO
             performance_mod = 1.0  # Modificador de risco padrão
             strategy_perf = self.performance_summary.get(strategy_used)
@@ -238,7 +255,7 @@ class OrionTrader:
             # Colocar ordem
             result, order_id = self.connector.api.buy(
                 position_size,
-                asset,
+                clean_asset, # Usar o nome do ativo limpo
                 direction,
                 1
             )

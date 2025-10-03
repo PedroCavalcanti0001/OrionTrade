@@ -5,6 +5,7 @@ Seletor de Estratégias Baseado no Regime
 import pandas as pd
 from typing import Dict, Optional, Tuple
 from .regime_classifier import MarketRegime, MarketRegimeClassifier
+import time
 
 
 class StrategySelector:
@@ -15,6 +16,51 @@ class StrategySelector:
         self.config = config
         self.regime_classifier = MarketRegimeClassifier(config, self.logger)
         self.analysis_config = config.get('analysis', {})
+
+        # ✅ COOLDOWN LOGIC
+        self.strategy_cooldown = {}  # ex: {'MEAN_REVERSION': 1678886400}
+        cooldown_config = self.config.get('strategy_cooldown', {})
+        self.cooldown_period = cooldown_config.get('period_seconds', 3600) # 1 hora
+        self.cooldown_min_trades = cooldown_config.get('min_trades', 20)
+        self.cooldown_win_rate_threshold = cooldown_config.get('win_rate_threshold', 0.45) # 45%
+
+    def update_strategy_performance(self, performance_summary: Dict):
+        """Atualiza o status de cooldown das estratégias com base no desempenho."""
+        now = time.time()
+
+        # Remover estratégias do cooldown se o tempo expirou
+        for strategy, end_time in list(self.strategy_cooldown.items()):
+            if now > end_time:
+                self.logger.info(f"Estratégia '{strategy}' removida do cooldown.")
+                del self.strategy_cooldown[strategy]
+
+        # Verificar se alguma estratégia deve entrar em cooldown
+        for strategy, stats in performance_summary.items():
+            if strategy in self.strategy_cooldown:
+                continue # Já está em cooldown
+
+            trade_count = stats.get('count', 0)
+            win_rate = stats.get('win_rate', 0)
+
+            if trade_count >= self.cooldown_min_trades and win_rate < self.cooldown_win_rate_threshold:
+                self.strategy_cooldown[strategy] = now + self.cooldown_period
+                self.logger.warning(
+                    f"Estratégia '{strategy}' colocada em cooldown por {self.cooldown_period / 60:.0f} minutos "
+                    f"devido a baixo desempenho (Win Rate: {win_rate:.2%}, Trades: {trade_count})."
+                )
+
+    def _is_strategy_in_cooldown(self, strategy_name: str) -> bool:
+        """Verifica se uma estratégia está atualmente em período de cooldown."""
+        if strategy_name in self.strategy_cooldown:
+            # Check if cooldown has expired
+            if time.time() < self.strategy_cooldown[strategy_name]:
+                return True
+            else:
+                # Cooldown expired, remove it
+                self.logger.info(f"Estratégia '{strategy_name}' removida do cooldown.")
+                del self.strategy_cooldown[strategy_name]
+                return False
+        return False
 
     def debug_confidence_calculation(self, df_with_features: pd.DataFrame, signal: Dict):
         """Debug do cálculo de confiança - VERSÃO CORRIGIDA (sem isEnabledFor)"""
@@ -115,7 +161,12 @@ class StrategySelector:
     def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict,
                                   context_trend: str) -> Dict:
         """Estratégia de seguir tendência com filtro MTA e entrada em pullback - ✅ VERSÃO DE ELITE"""
-        signal = self._get_wait_signal(analysis, 'TREND_FOLLOWING')
+        strategy_name = 'TREND_FOLLOWING'
+        if self._is_strategy_in_cooldown(strategy_name):
+            self.logger.debug(f"Estratégia {strategy_name} em cooldown. Ignorando.")
+            return self._get_wait_signal(analysis, f'{strategy_name}_COOLDOWN')
+
+        signal = self._get_wait_signal(analysis, strategy_name)
         signal['direction'] = trend_direction
 
         # ✅ FILTRO DE ELITE 1: Análise Multi-Timeframe (MTA)
@@ -180,7 +231,12 @@ class StrategySelector:
 
     def _mean_reversion_strategy(self, df: pd.DataFrame, analysis: Dict, context_trend: str) -> Dict:
         """Estratégia de reversão à média com vela de confirmação e filtro MTA - ✅ VERSÃO DE ELITE"""
-        signal = self._get_wait_signal(analysis, 'MEAN_REVERSION')
+        strategy_name = 'MEAN_REVERSION'
+        if self._is_strategy_in_cooldown(strategy_name):
+            self.logger.debug(f"Estratégia {strategy_name} em cooldown. Ignorando.")
+            return self._get_wait_signal(analysis, f'{strategy_name}_COOLDOWN')
+
+        signal = self._get_wait_signal(analysis, strategy_name)
 
         # ✅ FILTRO DE ELITE: Evitar reversão contra uma tendência de contexto forte.
         if (context_trend == 'Alta' and analysis['rsi'] > 50) or \
@@ -220,6 +276,10 @@ class StrategySelector:
 
     def _breakout_watch_strategy(self, df: pd.DataFrame, analysis: Dict) -> Dict:
         """Estratégia completa de rompimento para mercado em SQUEEZE"""
+        strategy_name = 'BREAKOUT'
+        if self._is_strategy_in_cooldown(strategy_name):
+            self.logger.debug(f"Estratégia {strategy_name} em cooldown. Ignorando.")
+            return self._get_wait_signal(analysis, f'{strategy_name}_COOLDOWN')
 
         if len(df) < 10:
             return self._get_breakout_wait_signal(analysis)
