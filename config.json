@@ -1,15 +1,38 @@
 {
   "trading": {
-    "assets": ["EURUSD-op", "GBPUSD-op", "USDJPY-op", "AUDUSD-op", "USDCAD-op", "EURGBP-op", "EURJPY-op", "GBPJPY-op", "AUDJPY-op", "EURCHF-op", "EURAUD-op", "EURCAD-op", "AUDCAD-op", "CADCHF-op"],
+    "assets": [
+      "EURUSD-op",
+      "GBPUSD-op",
+      "USDJPY-op",
+      "AUDUSD-op",
+      "USDCAD-op",
+      "EURGBP-op",
+      "EURJPY-op",
+      "GBPJPY-op",
+      "AUDJPY-op",
+      "EURCHF-op",
+      "EURCAD-op",
+      "AUDCAD-op",
+      "CADCHF-op"
+    ],
     "timeframe": 1,
     "initial_balance": 1000.0,
     "risk_per_trade": 2.0,
     "max_open_trades": 10,
-
     "max_trades_per_asset": 2,
     "stop_loss_atr_multiplier": 1.0,
     "take_profit_atr_multiplier": 1.5,
     "min_confidence": 0.4
+  },
+  "backtest": {
+    "days_to_download": 7,
+    "assets": [
+      "EURUSD-op",
+      "GBPUSD-op",
+      "USDJPY-op",
+      "AUDUSD-op",
+      "USDCAD-op"
+    ]
   },
   "analysis": {
     "adx_period": 10,

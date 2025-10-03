@@ -48,29 +48,43 @@ class OrionTrader:
         self.logger.info(f"OrionTrader inicializado no modo {mode}")
 
     def _initialize_components(self):
-        """Inicializa todos os componentes do sistema"""
+        """Inicializa todos os componentes do sistema."""
 
         trading_config = self.config.get('trading', {})
 
-        # Inicializar conector
         if self.mode == 'backtest':
-            initial_balance = trading_config.get('initial_balance', 1000.0)
-            self.connector = MockConnector(initial_balance, logger=self.logger)
+            # Para o backtest, precisamos de um conector real temporário para o download
+            temp_api_connector = None
+            email = os.getenv('IQ_EMAIL')
+            password = os.getenv('IQ_PASSWORD')
+            if email and password:
+                # Usamos o logger principal para este conector temporário
+                temp_api_connector = IQConnector(email, password, 'PRACTICE', logger=self.logger)
+                # É crucial conectar para poder usar a API
+                temp_api_connector.connect()
+            else:
+                self.logger.warning(
+                    "Credenciais da IQ Option não encontradas. O download automático de dados para backtest não funcionará.")
+
+            # ✅ CORREÇÃO: Passa o config e o conector real para o MockConnector
+            self.connector = MockConnector(
+                config=self.config,
+                logger=self.logger,
+                api_connector=temp_api_connector
+            )
+
         elif self.mode in ['demo', 'live']:
             email = os.getenv('IQ_EMAIL')
             password = os.getenv('IQ_PASSWORD')
-
             if not email or not password:
                 raise ValueError("Credenciais IQ Option não encontradas nas variáveis de ambiente")
-
             account_type = 'PRACTICE' if self.mode == 'demo' else 'REAL'
             self.connector = IQConnector(email, password, account_type, logger=self.logger)
         else:
             raise ValueError(f"Modo inválido: {self.mode}")
 
+        # O resto da função permanece igual
         self.connector.market_validator = MarketHoursValidator(self.connector, self.logger)
-
-        # Inicializar outros componentes
         self.strategy_selector = StrategySelector(self.config, self.logger)
         self.risk_manager = RiskManager(self.config, self.logger)
 

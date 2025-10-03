@@ -5,16 +5,15 @@ Ponto de entrada principal do bot
 """
 
 import argparse
-import importlib
 import json
 import os
 import sys
 import threading
-from pathlib import Path
 from dotenv import load_dotenv
 
 # CARREGAR .env
 load_dotenv()
+
 
 # SILENCIAR ERROS DE DIGITAL OPTIONS
 def silence_digital_errors():
@@ -41,20 +40,6 @@ def silence_digital_errors():
 silence_digital_errors()
 
 
-def load_module(module_path, class_name=None):
-    """Carrega módulos dinamicamente para evitar problemas de import"""
-    try:
-        spec = importlib.util.spec_from_file_location(module_path, module_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        if class_name:
-            return getattr(module, class_name)
-        return module
-    except Exception as e:
-        print(f"Erro ao carregar módulo {module_path}: {e}")
-        return None
-
-
 def load_config(config_path="config.json"):
     """Carrega configuração do arquivo JSON"""
     try:
@@ -68,8 +53,8 @@ def load_config(config_path="config.json"):
         print(f"Erro: Arquivo de configuração {config_path} contém JSON inválido.")
         sys.exit(1)
 
-def main():
 
+def main():
     parser = argparse.ArgumentParser(description='OrionTrader - Bot de Trading Adaptativo Multi-Ativos')
     parser.add_argument('--mode', type=str, required=True,
                         choices=['demo', 'live', 'backtest'],
@@ -78,78 +63,52 @@ def main():
                         help='Caminho para o arquivo de configuração')
     args = parser.parse_args()
 
-    # Carregar configurações
+    # Carregar configurações e logger
     config = load_config(args.config)
 
-    # Tentar carregar os módulos de forma flexível
-    OrionTrader = None
-    setup_logger = None
-
-    # Tentar diferentes caminhos de import
-    import importlib.util
-
-    # Carregar OrionTrader
-    import_paths = [
-        ('bot.trader.orion_trader', 'OrionTrader'),
-        ('trader.orion_trader', 'OrionTrader'),
-        ('orion_trader', 'OrionTrader'),
-    ]
-
-    logger_paths = [
-        'bot.utils.logger',
-        'utils.logger',
-        'logger'
-    ]
-
-    # Carregar OrionTrader
-    for module_path, class_name in import_paths:
-        try:
-            if '.' in module_path:
-                module = __import__(module_path, fromlist=[class_name])
-                OrionTrader = getattr(module, class_name)
-            else:
-                module = __import__(module_path)
-                OrionTrader = getattr(module, class_name)
-            print(f"✓ OrionTrader carregado de: {module_path}")
-            break
-        except ImportError as e:
-            print(f"✗ Falha ao carregar de {module_path}: {e}")
-            continue
-
-    # Carregar setup_logger
-    for module_path in logger_paths:
-        try:
-            if '.' in module_path:
-                module = __import__(module_path, fromlist=['setup_logger'])
-                setup_logger = getattr(module, 'setup_logger')
-            else:
-                module = __import__(module_path)
-                setup_logger = getattr(module, 'setup_logger')
-            print(f"✓ Logger carregado de: {module_path}")
-            break
-        except ImportError as e:
-            print(f"✗ Falha ao carregar logger de {module_path}: {e}")
-            continue
-
-    if not OrionTrader or not setup_logger:
-        print("ERRO: Não foi possível carregar os módulos necessários!")
-        print("Verifique a estrutura de arquivos:")
-        print("Deve ter: bot/trader/orion_trader.py OU trader/orion_trader.py")
+    # Importar e configurar o logger
+    try:
+        from bot.utils.logger import setup_logger
+        logger = setup_logger(config)
+    except ImportError:
+        print("ERRO: Não foi possível carregar o módulo do logger a partir de 'bot.utils.logger'.")
+        print("Verifique a estrutura de pastas do seu projeto.")
         sys.exit(1)
 
-    logger = setup_logger(config)
-
+    # ✅ LÓGICA DE EXECUÇÃO SEPARADA POR MODO
     try:
-        # Inicializar e executar o trader
-        trader = OrionTrader(config, args.mode, logger=logger)
+        if args.mode == 'backtest':
+            # ----------------------------------------------------
+            # --- MODO BACKTEST: Usa o motor rápido e vetorizado ---
+            # ----------------------------------------------------
+            logger.info(f"Modo '{args.mode}' selecionado. Iniciando o motor de backtest vetorizado.")
+            try:
+                from bot.backtest.engine import BacktestEngine
+                engine = BacktestEngine(config, logger)
+                engine.run()
+            except ImportError:
+                logger.error("ERRO: Não foi possível carregar o BacktestEngine a partir de 'bot.backtest.engine'.")
+                sys.exit(1)
 
+        else:  # Modos 'demo' ou 'live'
+            # -----------------------------------------------------------------
+            # --- MODO REAL/DEMO: Usa o OrionTrader para operação contínua ---
+            # -----------------------------------------------------------------
+            logger.info(f"Modo '{args.mode}' selecionado. Iniciando o OrionTrader para operação em tempo real.")
+            try:
+                from bot.trader.orion_trader import OrionTrader
+                trader = OrionTrader(config, args.mode, logger=logger)
+                trader.run()
+            except ImportError:
+                logger.error("ERRO: Não foi possível carregar o OrionTrader a partir de 'bot.trader.orion_trader'.")
+                sys.exit(1)
 
-        trader.run()
 
     except KeyboardInterrupt:
-        logger.info("Bot interrompido pelo usuário")
+        logger.info("Processo interrompido pelo usuário.")
+        sys.exit(0)
     except Exception as e:
-        logger.error(f"Erro fatal: {e}")
+        logger.error(f"Erro fatal não capturado na execução: {e}", exc_info=True)
         sys.exit(1)
 
 

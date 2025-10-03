@@ -26,176 +26,108 @@ class MarketRegimeClassifier:
         self.analysis_config = config.get('analysis', {})
 
     def calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcula todas as features técnicas - VERSÃO COMPLETAMENTE CORRIGIDA"""
+        """Calcula todas as features técnicas, normalizando colunas antes de tudo."""
 
-        self.logger.debug(f"Calculando features - DataFrame shape: {df.shape}")
+        self.logger.debug(f"Calculando features - DataFrame shape inicial: {df.shape}")
 
         try:
             # VERIFICAÇÃO INICIAL
             if df.empty or len(df) < 20:
-                self.logger.debug("DataFrame vazio ou insuficiente para cálculo de features")
-                return df
+                self.logger.debug("DataFrame vazio ou insuficiente para cálculo de features.")
+                return pd.DataFrame()  # Retorna DF vazio para indicar falha
 
-            # Verificar colunas necessárias
+            df = df.copy()
+
+            # ✅ SOLUÇÃO: Normalizar nomes das colunas ANTES de qualquer verificação
+            column_mapping = {'min': 'low', 'max': 'high', 'from': 'timestamp'}
+            df.rename(columns=column_mapping, inplace=True)
+
+            # Verificar colunas necessárias APÓS a normalização
             required_columns = ['open', 'high', 'low', 'close']
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
-                self.logger.warning(f"Colunas faltando: {missing_columns}")
-                return df
-
-            # Criar cópia para não modificar o original
-            df = df.copy()
+                self.logger.error(f"Mesmo após normalização, colunas essenciais estão faltando: {missing_columns}")
+                return pd.DataFrame()  # Retorna DF vazio para indicar falha
 
             # CONVERSÃO NUMÉRICA
-            for col in required_columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+            for col in required_columns + ['volume']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # Remover NaNs
-            df = df.dropna()
+            # Remover NaNs que possam ter surgido na conversão
+            df = df.dropna(subset=required_columns)
 
             if len(df) < 20:
-                self.logger.debug("Dados insuficientes após limpeza")
-                return df
+                self.logger.warning("Dados insuficientes após limpeza e conversão numérica.")
+                return pd.DataFrame()
 
-            self.logger.debug(f"Dados válidos para análise - shape: {df.shape}")
+            # --- O resto da função continua como antes ---
 
             # CONFIGURAÇÕES
-            bb_period = 20
-            ema_fast = 9
-            ema_slow = 21
-            rsi_period = 14
-            atr_period = 14
+            bb_period = self.analysis_config.get('bb_period', 20)
+            ema_fast = self.analysis_config.get('ema_fast', 9)
+            ema_slow = self.analysis_config.get('ema_slow', 21)
+            rsi_period = self.analysis_config.get('rsi_period', 14)
+            atr_period = self.analysis_config.get('atr_period', 14)
+            adx_period = self.analysis_config.get('adx_period', 14)
 
-            # 1. BANDAS DE BOLLINGER - CÁLCULO MANUAL GARANTIDO
+            # 1. BANDAS DE BOLLINGER
             try:
-                self.logger.debug("Calculando Bollinger Bands...")
                 rolling_mean = df['close'].rolling(window=bb_period).mean()
                 rolling_std = df['close'].rolling(window=bb_period).std()
-                rolling_std = rolling_std.fillna(0.001)  # Evitar std zero
-
                 df['bb_upper'] = rolling_mean + (rolling_std * 2)
                 df['bb_middle'] = rolling_mean
                 df['bb_lower'] = rolling_mean - (rolling_std * 2)
                 df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
-                self.logger.debug(f"BB calculado - Upper: {df['bb_upper'].iloc[-1]:.5f}")
             except Exception as e:
-                self.logger.warning(f"Erro no cálculo BB, usando fallback: {e}")
-                df['bb_upper'] = df['close'] * 1.02
-                df['bb_middle'] = df['close']
-                df['bb_lower'] = df['close'] * 0.98
-                df['bb_width'] = 0.04
+                self.logger.warning(f"Erro no cálculo BB: {e}")
+                df['bb_middle'] = df['close']  # Fallback mínimo
 
-            # 2. EMAs - CÁLCULO MANUAL GARANTIDO
+            # 2. EMAs
+            df['ema_fast'] = df['close'].ewm(span=ema_fast, adjust=False).mean()
+            df['ema_slow'] = df['close'].ewm(span=ema_slow, adjust=False).mean()
+
+            # 3. RSI
+            delta = df['close'].diff()
+            gain = delta.where(delta > 0, 0).fillna(0)
+            loss = (-delta.where(delta < 0, 0)).fillna(0)
+            avg_gain = gain.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
+            avg_loss = loss.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
+            rs = avg_gain / avg_loss.replace(0, 0.001)
+            df['rsi'] = 100 - (100 / (1 + rs))
+
+            # 4. ATR
+            high_low = df['high'] - df['low']
+            high_close_prev = abs(df['high'] - df['close'].shift(1))
+            low_close_prev = abs(df['low'] - df['close'].shift(1))
+            true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
+            df['atr'] = true_range.ewm(alpha=1 / atr_period, adjust=False).mean()
+
+            # 5. ADX
             try:
-                self.logger.debug("Calculando EMAs...")
-                df['ema_fast'] = df['close'].ewm(span=ema_fast, adjust=False).mean()
-                df['ema_slow'] = df['close'].ewm(span=ema_slow, adjust=False).mean()
-                self.logger.debug(f"EMA calculado - Fast: {df['ema_fast'].iloc[-1]:.5f}")
-            except Exception as e:
-                self.logger.warning(f"Erro no cálculo EMA, usando fallback: {e}")
-                df['ema_fast'] = df['close'].rolling(window=ema_fast).mean()
-                df['ema_slow'] = df['close'].rolling(window=ema_slow).mean()
-
-            # 3. RSI - CÁLCULO MANUAL GARANTIDO
-            try:
-                self.logger.debug("Calculando RSI...")
-                delta = df['close'].diff()
-                gain = delta.where(delta > 0, 0).fillna(0)
-                loss = (-delta.where(delta < 0, 0)).fillna(0)
-
-                avg_gain = gain.rolling(window=rsi_period, min_periods=1).mean()
-                avg_loss = loss.rolling(window=rsi_period, min_periods=1).mean()
-                avg_loss = avg_loss.replace(0, 0.001)  # Evitar divisão por zero
-
-                rs = avg_gain / avg_loss
-                df['rsi'] = 100 - (100 / (1 + rs))
-                self.logger.debug(f"RSI calculado: {df['rsi'].iloc[-1]:.2f}")
-            except Exception as e:
-                self.logger.warning(f"Erro no cálculo RSI, usando fallback: {e}")
-                df['rsi'] = 50.0
-
-            # 4. ATR - CÁLCULO MANUAL GARANTIDO
-            try:
-                self.logger.debug("Calculando ATR...")
-                high_low = df['high'] - df['low']
-                high_close_prev = abs(df['high'] - df['close'].shift(1))
-                low_close_prev = abs(df['low'] - df['close'].shift(1))
-
-                # Preencher NaN do shift
-                high_close_prev = high_close_prev.fillna(high_low)
-                low_close_prev = low_close_prev.fillna(high_low)
-
-                true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
-                df['atr'] = true_range.rolling(window=atr_period, min_periods=1).mean()
-                self.logger.debug(f"ATR calculado: {df['atr'].iloc[-1]:.5f}")
-            except Exception as e:
-                self.logger.warning(f"Erro no cálculo ATR, usando fallback: {e}")
-                df['atr'] = (df['high'] - df['low']).rolling(window=atr_period).mean()
-
-            # 5. ADX - CÁLCULO CORRETO (SEM SOBRESCREVER DATAFRAME)
-            try:
-                self.logger.debug("Calculando ADX CORRETO...")
-
-                # Usar pandas_ta mas PRESERVAR o DataFrame original
                 import pandas_ta as ta
-                adx_data = ta.adx(df['high'], df['low'], df['close'], length=14)
-
-                # ✅ CORREÇÃO: Adicionar colunas ADX ao DataFrame existente
-                df['adx'] = adx_data['ADX_14']
-                df['plus_di'] = adx_data['DMP_14']
-                df['minus_di'] = adx_data['DMN_14']
-
-                self.logger.debug(f"ADX calculado via pandas_ta: {df['adx'].iloc[-1]:.2f}")
-
+                adx_data = ta.adx(df['high'], df['low'], df['close'], length=adx_period)
+                if adx_data is not None and not adx_data.empty:
+                    df['adx'] = adx_data[f'ADX_{adx_period}']
+                    df['plus_di'] = adx_data[f'DMP_{adx_period}']
+                    df['minus_di'] = adx_data[f'DMN_{adx_period}']
             except Exception as e:
-                self.logger.warning(f"Erro no cálculo ADX, usando fallback manual: {e}")
-                # Fallback manual simplificado
-                df['adx'] = 25.0
-                df['plus_di'] = 30.0
-                df['minus_di'] = 30.0
+                self.logger.warning(f"Erro no cálculo do ADX: {e}")
 
-            # PREENCHIMENTO FINAL
-            indicator_cols = ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width',
-                              'ema_fast', 'ema_slow', 'rsi', 'atr', 'adx', 'plus_di', 'minus_di']
+            # Preencher quaisquer NaNs restantes no início das séries de indicadores
+            df.fillna(method='bfill', inplace=True)
 
+            # Garantir que as colunas existam, mesmo que o cálculo falhe
+            indicator_cols = ['adx', 'plus_di', 'minus_di', 'rsi', 'ema_fast', 'ema_slow', 'bb_middle']
             for col in indicator_cols:
-                if col in df.columns:
-                    df[col] = df[col].ffill().bfill()
-                    # Garantir valores padrão se ainda houver NaN
-                    if df[col].isna().any() or df[col].isnull().any():
-                        if col == 'rsi':
-                            df[col] = 50.0
-                        elif col == 'adx':
-                            df[col] = 25.0
-                        elif 'di' in col:
-                            df[col] = 30.0
-                        elif 'bb' in col:
-                            df[col] = df['close']
-                        else:
-                            df[col] = df['close']
-
-            # DEBUG FINAL - VERIFICAR SE TODOS OS INDICADORES ESTÃO PRESENTES
-            self.logger.debug("=== VERIFICAÇÃO FINAL DE INDICADORES ===")
-            for col in indicator_cols:
-                if col in df.columns:
-                    self.logger.debug(f"{col}: {df[col].iloc[-1]}")
-                else:
-                    self.logger.warning(f"❌ INDICADOR FALTANDO: {col}")
-            self.logger.debug("========================================")
+                if col not in df.columns:
+                    df[col] = 50 if col == 'rsi' else 0 if col == 'adx' else df['close']
 
             return df
 
         except Exception as e:
-            self.logger.error(f"Erro crítico em calculate_features: {e}")
-            # Retornar fallback mínimo
-            for col in ['bb_upper', 'bb_middle', 'bb_lower', 'ema_fast', 'ema_slow']:
-                if col not in df.columns:
-                    df[col] = df['close']
-            if 'rsi' not in df.columns:
-                df['rsi'] = 50.0
-            if 'adx' not in df.columns:
-                df['adx'] = 25.0
-            return df
+            self.logger.error(f"Erro crítico em calculate_features: {e}", exc_info=True)
+            return pd.DataFrame()  # Retorna DF vazio para indicar falha grave
 
     def classify_regime(self, df: pd.DataFrame) -> MarketRegime:
         """Classifica o regime de mercado - COM DEBUG DETALHADO"""
