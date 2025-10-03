@@ -13,7 +13,8 @@ class BacktestEngine:
         self.config = config
         self.logger = logger
         self.trading_config = config.get('trading', {})
-        self.assets = self.trading_config.get('assets', [])
+        self.backtest_config = config.get('backtest', {})
+        self.assets = self.backtest_config.get('assets', [])
         self.timeframe = self.trading_config.get('timeframe', 1)
 
         # Instanciar os componentes de análise
