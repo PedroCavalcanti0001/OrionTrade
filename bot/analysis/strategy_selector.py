@@ -7,6 +7,8 @@ from typing import Dict, Optional, Tuple
 from .regime_classifier import MarketRegime, MarketRegimeClassifier
 import time
 
+from .strategies import get_trend_following_signals, get_mean_reversion_signals
+
 
 class StrategySelector:
     """Seleciona e executa estratégias baseadas no regime de mercado"""
@@ -160,61 +162,26 @@ class StrategySelector:
 
     def _trend_following_strategy(self, df: pd.DataFrame, trend_direction: str, analysis: Dict,
                                   context_trend: str) -> Dict:
-        """Estratégia de seguir tendência com filtro MTA e entrada em pullback - ✅ VERSÃO DE ELITE"""
-        strategy_name = 'TREND_FOLLOWING'
-        if self._is_strategy_in_cooldown(strategy_name):
-            self.logger.debug(f"Estratégia {strategy_name} em cooldown. Ignorando.")
-            return self._get_wait_signal(analysis, f'{strategy_name}_COOLDOWN')
+        """Usa a função centralizada para obter sinal de tendência."""
+        signal = self._get_wait_signal(analysis, 'TREND_FOLLOWING')
 
-        signal = self._get_wait_signal(analysis, strategy_name)
-        signal['direction'] = trend_direction
-
-        # ✅ FILTRO DE ELITE 1: Análise Multi-Timeframe (MTA)
-        # A operação deve estar a favor da tendência do timeframe maior.
+        # Filtro de Multi-Timeframe continua aqui, pois é parte da SELEÇÃO, não da ESTRATÉGIA
         is_aligned_with_context = (trend_direction == 'LONG' and context_trend == 'Alta') or \
                                   (trend_direction == 'SHORT' and context_trend == 'Baixa') or \
-                                  context_trend == 'Indefinida'  # Permite se o contexto não for claro
+                                  context_trend == 'Indefinida'
 
         if not is_aligned_with_context:
-            self.logger.debug(f"Trade {trend_direction} bloqueada. Sinal M1 contra tendência M15 ({context_trend}).")
             return signal
 
-        current = df.iloc[-1]
-        rsi = current.get('rsi', 50)
-        adx = current.get('adx', 0)
+        # Chama a função de estratégia centralizada
+        strategy_signals = get_trend_following_signals(df)
+        last_signal = strategy_signals.iloc[-1]
 
-        # ✅ FILTRO DE ELITE 2: Entrada em Pullback
-        # Não entramos no pico do movimento, mas sim na retração.
-        is_pullback = (trend_direction == 'LONG' and 40 <= rsi <= 55) or \
-                      (trend_direction == 'SHORT' and 45 <= rsi <= 60)
-
-        if not is_pullback or adx < 20:  # Exige ADX mínimo para confirmar que ainda é uma tendência
-            self.logger.debug(f"Aguardando pullback para {trend_direction}. RSI atual: {rsi:.2f}")
-            return signal
-
-        # Se todas as condições de elite forem atendidas, calculamos a confiança.
-        adx_score = min(adx / 50.0, 1.0)
-        rsi_score = 1.0 - (abs(50 - rsi) / 50.0)  # Mais perto de 50, maior o score no pullback
-
-        # Bônus se o pullback quase tocou a EMA lenta, um ponto de suporte/resistência dinâmico
-        ema_slow = current.get('ema_slow', 0)
-        pullback_bonus = 0
-        if trend_direction == 'LONG' and current['low'] <= ema_slow:
-            pullback_bonus = 0.2
-        elif trend_direction == 'SHORT' and current['high'] >= ema_slow:
-            pullback_bonus = 0.2
-
-        final_confidence = (adx_score * 0.4) + (rsi_score * 0.4) + (pullback_bonus * 0.2)
-
-        # Confiança adicional pela MTA
-        if is_aligned_with_context:
-            final_confidence = min(final_confidence * 1.2, 0.95)
-
-        if final_confidence >= self.config['trading'].get('min_confidence', 0.5):
-            signal.update({
-                'action': 'ENTER',
-                'confidence': final_confidence
-            })
+        if (trend_direction == 'LONG' and last_signal == 'ENTER_LONG') or \
+                (trend_direction == 'SHORT' and last_signal == 'ENTER_SHORT'):
+            signal['action'] = 'ENTER'
+            signal['direction'] = trend_direction
+            signal['confidence'] = 0.75  # A confiança pode ser calculada de forma mais complexa aqui se necessário
 
         return signal
 
@@ -230,47 +197,22 @@ class StrategySelector:
         }
 
     def _mean_reversion_strategy(self, df: pd.DataFrame, analysis: Dict, context_trend: str) -> Dict:
-        """Estratégia de reversão à média com vela de confirmação e filtro MTA - ✅ VERSÃO DE ELITE"""
-        strategy_name = 'MEAN_REVERSION'
-        if self._is_strategy_in_cooldown(strategy_name):
-            self.logger.debug(f"Estratégia {strategy_name} em cooldown. Ignorando.")
-            return self._get_wait_signal(analysis, f'{strategy_name}_COOLDOWN')
+        """Usa a função centralizada para obter sinal de reversão à média."""
+        signal = self._get_wait_signal(analysis, 'MEAN_REVERSION')
 
-        signal = self._get_wait_signal(analysis, strategy_name)
-
-        # ✅ FILTRO DE ELITE: Evitar reversão contra uma tendência de contexto forte.
+        # Filtro de MTA também pode ser aplicado aqui
         if (context_trend == 'Alta' and analysis['rsi'] > 50) or \
                 (context_trend == 'Baixa' and analysis['rsi'] < 50):
-            self.logger.debug(f"Reversão bloqueada pela forte tendência de contexto ({context_trend}).")
             return signal
 
-        current = df.iloc[-1]
+        # Chama a função de estratégia centralizada
+        strategy_signals = get_mean_reversion_signals(df)
+        last_signal = strategy_signals.iloc[-1]
 
-        # CONDIÇÃO DE SHORT: Sobrecompra + Vela de Confirmação Baixista
-        is_overbought = current['close'] >= current['bb_upper'] * 0.995 or current['rsi'] > 72
-        is_bearish_confirmation = current['close'] < current['open']
-
-        if is_overbought and is_bearish_confirmation:
-            confidence = 0.75 + (min(current['rsi'] - 70, 20) / 100)  # Confiança aumenta com RSI mais extremo
-            signal.update({
-                'action': 'ENTER',
-                'direction': 'SHORT',
-                'confidence': min(confidence, 0.95)
-            })
-            return signal
-
-        # CONDIÇÃO DE LONG: Sobrevenda + Vela de Confirmação Altista
-        is_oversold = current['close'] <= current['bb_lower'] * 1.005 or current['rsi'] < 28
-        is_bullish_confirmation = current['close'] > current['open']
-
-        if is_oversold and is_bullish_confirmation:
-            confidence = 0.75 + (min(30 - current['rsi'], 20) / 100)
-            signal.update({
-                'action': 'ENTER',
-                'direction': 'LONG',
-                'confidence': min(confidence, 0.95)
-            })
-            return signal
+        if last_signal != 'WAIT':
+            signal['action'] = 'ENTER'
+            signal['direction'] = 'LONG' if 'LONG' in last_signal else 'SHORT'
+            signal['confidence'] = 0.75
 
         return signal
 

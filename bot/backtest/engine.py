@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from bot.analysis.regime_classifier import MarketRegimeClassifier, MarketRegime
+from bot.analysis.strategies import get_mean_reversion_signals, get_trend_following_signals
 
 
 class BacktestEngine:
@@ -27,7 +28,7 @@ class BacktestEngine:
 
         self.trading_config = config.get('trading', {})
         self.backtest_config = config.get('backtest', {})
-        self.assets = self.trading_config.get('assets', [])
+        self.assets = self.backtest_config.get('assets', [])
         self.timeframe = self.trading_config.get('timeframe', 1)
         self.data_dir = 'historical_data'
 
@@ -160,25 +161,32 @@ class BacktestEngine:
         return df_with_features
 
     def _generate_all_signals(self, df: pd.DataFrame) -> pd.Series:
-        """Gera sinais de trading de forma vetorizada."""
-        self.logger.info("Gerando sinais de trading...")
+        """Gera sinais de trading usando as funções de estratégia centralizadas."""
+        self.logger.info("Gerando sinais de trading usando módulo centralizado...")
 
+        # 1. Calcula os sinais para cada estratégia, para o dataset inteiro
+        trend_signals = get_trend_following_signals(df)
+        reversion_signals = get_mean_reversion_signals(df)
+
+        # 2. Define onde cada estratégia deve ser aplicada, com base no regime
         conditions = [
-            # Sinal de Compra (Reversão)
-            (df['regime'] == MarketRegime.RANGING) & (df['close'] <= df['bb_lower']) & (df['close'] > df['open']),
-            # Sinal de Venda (Reversão)
-            (df['regime'] == MarketRegime.RANGING) & (df['close'] >= df['bb_upper']) & (df['close'] < df['open']),
-            # Sinal de Compra (Tendência)
-            (df['regime'] == MarketRegime.UPTREND) & (df['ema_fast'] > df['ema_slow']) & (df['rsi'].between(40, 55)),
-            # Sinal de Venda (Tendência)
-            (df['regime'] == MarketRegime.DOWNTREND) & (df['ema_fast'] < df['ema_slow']) & (df['rsi'].between(45, 60))
+            (df['regime'] == MarketRegime.RANGING) & (reversion_signals != 'WAIT'),
+            (df['regime'] == MarketRegime.UPTREND) & (trend_signals == 'ENTER_LONG'),
+            (df['regime'] == MarketRegime.DOWNTREND) & (trend_signals == 'ENTER_SHORT')
         ]
-        choices = ['ENTER_LONG', 'ENTER_SHORT', 'ENTER_LONG', 'ENTER_SHORT']
 
+        # 3. Define qual o resultado para cada condição
+        choices = [
+            reversion_signals,  # Se for RANGING, usa o sinal de reversão
+            trend_signals,  # Se for UPTREND, usa o sinal de tendência
+            trend_signals  # Se for DOWNTREND, usa o sinal de tendência
+        ]
+
+        # np.select escolhe o sinal correto para cada candle baseado no seu regime
         return np.select(conditions, choices, default='WAIT')
 
     def _simulate_trades(self, df: pd.DataFrame):
-        """Simula as trades e calcula as métricas de performance."""
+        """Simula as trades e calcula as métricas de performance por estratégia."""
         self.logger.info("Simulando execuções de trades e calculando métricas...")
 
         trades = []
@@ -189,21 +197,23 @@ class BacktestEngine:
 
         for i in range(len(df) - 1):
             signal = df['signal'].iloc[i]
+            regime = df['regime'].iloc[i]
+
+            strategy_used = 'UNKNOWN'
+            if signal != 'WAIT':
+                if regime in [MarketRegime.UPTREND, MarketRegime.DOWNTREND]:
+                    strategy_used = 'TREND_FOLLOWING'
+                elif regime == MarketRegime.RANGING:
+                    strategy_used = 'MEAN_REVERSION'
+
             if signal in ['ENTER_LONG', 'ENTER_SHORT']:
                 entry_price = df['close'].iloc[i]
                 result_price = df['close'].iloc[i + 1]
-                pnl = 0
+                pnl = -risk_amount
 
-                if signal == 'ENTER_LONG':
-                    if result_price > entry_price:
-                        pnl = risk_amount * payout
-                    else:
-                        pnl = -risk_amount
-                elif signal == 'ENTER_SHORT':
-                    if result_price < entry_price:
-                        pnl = risk_amount * payout
-                    else:
-                        pnl = -risk_amount
+                if (signal == 'ENTER_LONG' and result_price > entry_price) or \
+                        (signal == 'ENTER_SHORT' and result_price < entry_price):
+                    pnl = risk_amount * payout
 
                 balance += pnl
                 balance_history.append(balance)
@@ -211,48 +221,69 @@ class BacktestEngine:
                     'index': i,
                     'entry_time': df['timestamp'].iloc[i],
                     'direction': 'LONG' if 'LONG' in signal else 'SHORT',
-                    'pnl': pnl
+                    'pnl': pnl,
+                    'strategy': strategy_used  # ✅ Rastrear a estratégia usada
                 })
 
         if not trades:
             return [], {}
 
-        # Cálculo das Métricas
-        pnl_values = [t['pnl'] for t in trades]
-        total_pnl = sum(pnl_values)
-        wins = sum(1 for pnl in pnl_values if pnl > 0)
-        losses = len(pnl_values) - wins
+        # --- Cálculo das Métricas (Agora separado por estratégia) ---
+        metrics = {'OVERALL': self._calculate_metrics_for_trades(trades, balance_history)}
 
+        trend_trades = [t for t in trades if t['strategy'] == 'TREND_FOLLOWING']
+        reversion_trades = [t for t in trades if t['strategy'] == 'MEAN_REVERSION']
+
+        if trend_trades:
+            metrics['TREND_FOLLOWING'] = self._calculate_metrics_for_trades(trend_trades)
+        if reversion_trades:
+            metrics['MEAN_REVERSION'] = self._calculate_metrics_for_trades(reversion_trades)
+
+        return trades, metrics
+
+    # Adicione este novo método à classe BacktestEngine
+    def _calculate_metrics_for_trades(self, trades: list, balance_history: list = None):
+        """Método auxiliar para calcular métricas para uma lista de trades."""
+        pnl_values = [t['pnl'] for t in trades]
         gross_profit = sum(pnl for pnl in pnl_values if pnl > 0)
         gross_loss = abs(sum(pnl for pnl in pnl_values if pnl < 0))
 
-        # Drawdown Máximo
-        peak = balance_history[0]
         max_drawdown = 0
-        for balance_value in balance_history:
-            if balance_value > peak:
-                peak = balance_value
-            drawdown = (peak - balance_value) / peak if peak > 0 else 0
-            if drawdown > max_drawdown:
-                max_drawdown = drawdown
+        if balance_history:
+            peak = balance_history[0]
+            for balance_value in balance_history:
+                if balance_value > peak:
+                    peak = balance_value
+                drawdown = (peak - balance_value) / peak if peak > 0 else 0
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
 
-        metrics = {
-            "total_pnl": total_pnl,
+        return {
+            "total_pnl": sum(pnl_values),
             "total_trades": len(trades),
-            "win_rate": (wins / len(trades)) if trades else 0,
+            "win_rate": (sum(1 for pnl in pnl_values if pnl > 0) / len(trades)) if trades else 0,
             "profit_factor": (gross_profit / gross_loss) if gross_loss > 0 else float('inf'),
             "max_drawdown": max_drawdown
         }
-        return trades, metrics
 
-    def _log_metrics(self, asset, metrics):
-        """Loga as métricas de performance para um ativo."""
+        # Substitua o método _log_metrics
+
+    def _log_metrics(self, asset, all_metrics):
+        """Loga as métricas de performance detalhadas por estratégia."""
         self.logger.info(f"📊 Métricas para {asset}:")
-        self.logger.info(f"  Trades Totais: {metrics['total_trades']}")
-        self.logger.info(f"  Taxa de Acerto: {metrics['win_rate']:.2%}")
-        self.logger.info(f"  Profit Factor: {metrics['profit_factor']:.2f}")
-        self.logger.info(f"  Drawdown Máximo: {metrics['max_drawdown']:.2%}")
-        self.logger.info(f"  Lucro/Prejuízo: ${metrics['total_pnl']:.2f}")
+        for strategy_name, metrics in all_metrics.items():
+            drawdown_log = f"| Drawdown Máximo: {metrics['max_drawdown']:.2%}" if strategy_name == 'OVERALL' else ""
+
+            # ✅ CORREÇÃO: A formatação da taxa de acerto foi ajustada para ser compatível.
+            win_rate_str = f"{metrics['win_rate']:.2%}"
+
+            self.logger.info(
+                f"  📈 Estratégia: {strategy_name:<16} "
+                f"| Trades: {metrics['total_trades']:<4} "
+                f"| Acerto: {win_rate_str:<8} "
+                f"| P/L: ${metrics['total_pnl']:<8.2f} "
+                f"{drawdown_log}"
+            )
 
     def _plot_results(self, asset, df, trades):
         """Gera um gráfico HTML interativo com os resultados do backtest."""

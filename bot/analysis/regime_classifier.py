@@ -115,7 +115,7 @@ class MarketRegimeClassifier:
                 self.logger.warning(f"Erro no cálculo do ADX: {e}")
 
             # Preencher quaisquer NaNs restantes no início das séries de indicadores
-            df.fillna(method='bfill', inplace=True)
+            df.bfill(inplace=True)
 
             # Garantir que as colunas existam, mesmo que o cálculo falhe
             indicator_cols = ['adx', 'plus_di', 'minus_di', 'rsi', 'ema_fast', 'ema_slow', 'bb_middle']
