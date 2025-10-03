@@ -33,8 +33,8 @@ class MockConnector:
         self.data_dir = 'historical_data'
 
     def connect(self) -> bool:
-        """Verifica, baixa (se necessário) e carrega os dados históricos."""
-        self.logger.info("Iniciando conector de backtest com download 'embutido'...")
+        """Verifica, baixa (se necessário) e carrega os dados históricos, garantindo que são suficientes."""
+        self.logger.info("Iniciando conector de backtest com download 'embutido' e verificação de suficiência...")
 
         if not self.assets_to_test:
             self.logger.error("Nenhum ativo configurado para o backtest em 'config.json'.")
@@ -42,17 +42,38 @@ class MockConnector:
 
         try:
             os.makedirs(self.data_dir, exist_ok=True)
+            required_days = self.backtest_config.get('days_to_download', 30)
 
-            # Para cada ativo, verificar se os dados locais existem. Se não, baixar.
             for asset in self.assets_to_test:
                 file_path = os.path.join(self.data_dir, f"{asset}_M{self.timeframe}.csv")
+                file_is_sufficient = False
 
-                if not os.path.exists(file_path):
-                    self.logger.warning(f"Arquivo de dados '{file_path}' não encontrado.")
+                # ✅ LÓGICA DE VERIFICAÇÃO DE SUFICIÊNCIA
+                if os.path.exists(file_path):
+                    try:
+                        df_check = pd.read_csv(file_path)
+                        if not df_check.empty and 'from' in df_check.columns:
+                            # Converte a coluna 'from' para datetime para verificar o intervalo
+                            timestamps = pd.to_datetime(df_check['from'], unit='s')
+                            data_duration_days = (timestamps.max() - timestamps.min()).days
+
+                            if data_duration_days >= (required_days - 2):  # -2 dias de tolerância
+                                self.logger.info(
+                                    f"Arquivo de dados '{file_path}' encontrado e é suficiente ({data_duration_days} dias).")
+                                file_is_sufficient = True
+                            else:
+                                self.logger.warning(
+                                    f"Arquivo de dados '{file_path}' encontrado, mas é insuficiente ({data_duration_days}/{required_days} dias). Baixando novamente.")
+                    except Exception as e:
+                        self.logger.error(
+                            f"Não foi possível ler o arquivo de dados existente '{file_path}': {e}. Baixando novamente.")
+
+                # Se o arquivo não existe ou não é suficiente, faz o download
+                if not file_is_sufficient:
                     if not self._fetch_data_for_asset(asset):
-                        return False # Falha no download impede o início do backtest
+                        return False  # Falha no download impede o início do backtest
 
-                # Carregar dados do arquivo CSV
+                # Carregar os dados (agora garantidamente suficientes)
                 df = pd.read_csv(file_path)
                 self.historical_data_frames[asset] = df.to_dict('records')
                 self.logger.info(f"Dados para '{asset}' carregados com sucesso ({len(df)} candles).")
@@ -60,14 +81,16 @@ class MockConnector:
             # Sincronizar os dados e preparar para a simulação
             min_length = min(len(data) for data in self.historical_data_frames.values())
             if min_length < 200:
-                self.logger.error(f"Dados insuficientes para o backtest (mínimo de 200 candles). Encontrado: {min_length}")
+                self.logger.error(
+                    f"Dados insuficientes para o backtest (mínimo de 200 candles). Encontrado: {min_length}")
                 return False
 
-            self.max_index = min_length - 2 # -2 para garantir que o candle de resultado sempre exista
+            self.max_index = min_length - 2
             self.current_index = 200
 
             self.connected = True
-            self.logger.info(f"Backtest pronto para iniciar. Total de {self.max_index - self.current_index} candles para simulação.")
+            self.logger.info(
+                f"Backtest pronto para iniciar. Total de {self.max_index - self.current_index} candles para simulação.")
             return True
 
         except Exception as e:

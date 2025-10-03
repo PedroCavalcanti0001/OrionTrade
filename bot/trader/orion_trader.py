@@ -66,7 +66,7 @@ class OrionTrader:
                 self.logger.warning(
                     "Credenciais da IQ Option não encontradas. O download automático de dados para backtest não funcionará.")
 
-            # ✅ CORREÇÃO: Passa o config e o conector real para o MockConnector
+
             self.connector = MockConnector(
                 config=self.config,
                 logger=self.logger,
