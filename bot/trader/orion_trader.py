@@ -219,12 +219,10 @@ class OrionTrader:
             direction = 'call' if signal['direction'] == 'LONG' else 'put'
             strategy_used = signal.get('strategy_used', 'UNKNOWN')
 
-            # Limpar o nome do ativo (remover -op se presente)
-            clean_asset = asset.replace('-op', '')
 
             # Verificar se o mercado está aberto para o ativo
-            if not self.connector.market_validator.is_market_open(clean_asset):
-                self.logger.warning(f"Mercado para {clean_asset} está fechado. Não é possível executar a ordem.")
+            if not self.connector.market_validator.is_asset_open(asset):
+                self.logger.warning(f"Mercado para {asset} está fechado. Não é possível executar a ordem.")
                 return
 
             # ✅ LÓGICA DE RISCO ADAPTATIVO
@@ -255,7 +253,7 @@ class OrionTrader:
             # Colocar ordem
             result, order_id = self.connector.api.buy(
                 position_size,
-                clean_asset, # Usar o nome do ativo limpo
+                asset, # Usar o nome do ativo limpo
                 direction,
                 1
             )
